@@ -9,11 +9,11 @@ const Login = () => {
   const navigate = useNavigate();
   const dispatch = useDispatch();
 
-  const backendBase = import.meta.env.VITE_BACKEND_URL || 'http://localhost:5000';
+  const backendBase = (
+    import.meta.env.VITE_BACKEND_URL || 'https://sahayatri-p95g.onrender.com'
+  ).replace(/\/$/, '');
 
-  const oauthGoogleUrl =
-    import.meta.env.VITE_AUTH_GOOGLE_URL ||
-    `${backendBase.replace(/\/$/, '')}/api/auth/google`;
+  const oauthGoogleUrl = `${backendBase}/api/auth/google`;
 
   const [formData, setFormData] = useState({
     email: '',
@@ -50,7 +50,6 @@ const Login = () => {
 
   const handleSubmit = async (e) => {
     e.preventDefault();
-
     setLoading(true);
 
     try {
@@ -84,7 +83,10 @@ const Login = () => {
 
         <form className="space-y-6" onSubmit={handleSubmit}>
           <div>
-            <label className="block text-sm font-medium text-slate-700 mb-1.5" htmlFor="email">
+            <label
+              className="block text-sm font-medium text-slate-700 mb-1.5"
+              htmlFor="email"
+            >
               Email Address
             </label>
 
@@ -107,7 +109,10 @@ const Login = () => {
 
           <div>
             <div className="flex items-center justify-between mb-1.5">
-              <label className="block text-sm font-medium text-slate-700" htmlFor="password">
+              <label
+                className="block text-sm font-medium text-slate-700"
+                htmlFor="password"
+              >
                 Password
               </label>
 
@@ -153,7 +158,9 @@ const Login = () => {
             </div>
 
             <div className="relative flex justify-center text-sm">
-              <span className="px-2 bg-white text-slate-500">Or continue with</span>
+              <span className="px-2 bg-white text-slate-500">
+                Or continue with
+              </span>
             </div>
           </div>
 
@@ -168,7 +175,7 @@ const Login = () => {
         </div>
 
         <p className="mt-8 text-center text-sm text-slate-600">
-          Don't have an account?{' '}
+          Don&apos;t have an account?{' '}
           <Link
             to="/register"
             className="font-semibold text-blue-600 hover:text-blue-500 transition-colors"
