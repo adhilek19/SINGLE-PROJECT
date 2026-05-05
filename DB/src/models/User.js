@@ -31,6 +31,72 @@ const safetyPreferenceSchema = new mongoose.Schema(
   { _id: false }
 );
 
+const currentLocationSchema = new mongoose.Schema(
+  {
+    type: {
+      type: String,
+      enum: ['Point'],
+      default: 'Point',
+      required: true,
+    },
+
+    coordinates: {
+      type: [Number], // [lng, lat]
+      required: true,
+      validate: {
+        validator(value) {
+          if (!Array.isArray(value) || value.length !== 2) return false;
+
+          const [lng, lat] = value.map(Number);
+
+          return (
+            Number.isFinite(lng) &&
+            Number.isFinite(lat) &&
+            lng >= -180 &&
+            lng <= 180 &&
+            lat >= -90 &&
+            lat <= 90
+          );
+        },
+        message:
+          'currentLocation.coordinates must be [lng, lat] with valid ranges',
+      },
+    },
+
+    updatedAt: {
+      type: Date,
+      default: Date.now,
+    },
+  },
+  { _id: false }
+);
+
+const vehicleSchema = new mongoose.Schema(
+  {
+    type: {
+      type: String,
+      enum: ['bike', 'car', 'auto', 'van'],
+    },
+
+    number: {
+      type: String,
+      trim: true,
+      uppercase: true,
+    },
+
+    model: {
+      type: String,
+      trim: true,
+    },
+
+    image: {
+      type: String,
+      default: '',
+    },
+  },
+  { _id: false }
+);
+
 const userSchema = new mongoose.Schema(
   {
     name: {
@@ -56,6 +122,7 @@ const userSchema = new mongoose.Schema(
 
     googleId: {
       type: String,
+      trim: true,
     },
 
     isVerified: {
@@ -110,34 +177,11 @@ const userSchema = new mongoose.Schema(
       },
     ],
 
+    // IMPORTANT:
+    // No default here. Save location only when coordinates exist.
     currentLocation: {
-      type: {
-        type: String,
-        enum: ['Point'],
-        default: 'Point',
-      },
-      coordinates: {
-        type: [Number],
-        validate: {
-          validator(value) {
-            return (
-              Array.isArray(value) &&
-              value.length === 2 &&
-              Number.isFinite(Number(value[0])) &&
-              Number.isFinite(Number(value[1])) &&
-              Number(value[1]) >= -90 &&
-              Number(value[1]) <= 90 &&
-              Number(value[0]) >= -180 &&
-              Number(value[0]) <= 180
-            );
-          },
-          message:
-            'currentLocation.coordinates must be [lng, lat] with valid ranges',
-        },
-      },
-      updatedAt: {
-        type: Date,
-      },
+      type: currentLocationSchema,
+      default: undefined,
     },
 
     rating: {
@@ -150,26 +194,12 @@ const userSchema = new mongoose.Schema(
     rideCount: {
       type: Number,
       default: 0,
+      min: 0,
     },
 
     vehicle: {
-      type: {
-        type: String,
-        enum: ['bike', 'car', 'auto', 'van'],
-      },
-      number: {
-        type: String,
-        trim: true,
-        uppercase: true,
-      },
-      model: {
-        type: String,
-        trim: true,
-      },
-      image: {
-        type: String,
-        default: '',
-      },
+      type: vehicleSchema,
+      default: () => ({}),
     },
   },
   { timestamps: true }
@@ -177,11 +207,15 @@ const userSchema = new mongoose.Schema(
 
 userSchema.pre('validate', function () {
   this.verification = this.verification || {};
+
   this.verification.email = Boolean(this.isVerified);
   this.verification.profilePhoto = Boolean(this.profilePic);
   this.verification.phone = Boolean(this.phone);
   this.verification.vehicle = Boolean(
-    this.vehicle?.type && (this.vehicle?.model || this.vehicle?.number || this.vehicle?.image)
+    this.vehicle?.type ||
+      this.vehicle?.model ||
+      this.vehicle?.number ||
+      this.vehicle?.image
   );
 });
 
@@ -191,13 +225,23 @@ userSchema.pre('save', async function () {
 });
 
 userSchema.methods.comparePassword = function (plain) {
+  if (!this.password) return false;
   return bcrypt.compare(plain, this.password);
 };
 
-userSchema.index({ googleId: 1 }, { sparse: true });
+userSchema.index({ googleId: 1 }, { unique: true, sparse: true });
 userSchema.index({ phone: 1 }, { sparse: true });
 userSchema.index({ role: 1, isVerified: 1 });
-userSchema.index({ currentLocation: '2dsphere' });
 userSchema.index({ blockedUsers: 1 });
+
+userSchema.index(
+  { currentLocation: '2dsphere' },
+  {
+    sparse: true,
+    partialFilterExpression: {
+      'currentLocation.coordinates': { $exists: true },
+    },
+  }
+);
 
 export default mongoose.model('User', userSchema);
