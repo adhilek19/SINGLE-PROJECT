@@ -6,6 +6,7 @@ const envSchema = joi.object({
   PORT:joi.number().default(5000),
   BACKEND_URL: joi.string().uri().default('http://localhost:5000'),
   CLIENT_URL:joi.string().uri().trim().required(),
+  CLIENT_URLS:joi.string().allow('').default(''),
   MONGO_URI:joi.string().uri().required(),
 
   ACCESS_SECRET:joi.string().min(32).required(),

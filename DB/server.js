@@ -1,4 +1,4 @@
-import './src/config/env.js'; // ✅ FIXED
+import './src/config/env.js'; 
 
 import express from 'express';
 import http from 'http';
@@ -22,18 +22,49 @@ import meRoutes from './src/routes/meRoutes.js';
 import rideRequestRoutes from './src/routes/rideRequestRoutes.js';
 import { initSocket } from './src/socket/socketServer.js';
 
-import './src/config/passport.js'; // ✅ this is already correct
+import './src/config/passport.js'; 
 
 const app = express();
 
-app.use(helmet());
+const normalizeOrigin = (origin = '') => origin.trim().replace(/\/+$/, '');
 
-app.use(cors({
-  origin: env.CLIENT_URL,
+const allowedOrigins = [
+  'http://localhost:5173',
+  'http://localhost:5174',
+  env.CLIENT_URL,
+  ...(env.CLIENT_URLS ? env.CLIENT_URLS.split(',') : []),
+]
+  .map(normalizeOrigin)
+  .filter(Boolean);
+
+const vercelPreviewRegex =
+  /^https:\/\/saha-yatri-[a-z0-9-]+-adhilek100-3295s-projects\.vercel\.app$/i;
+
+const corsOptions = {
+  origin(origin, callback) {
+    if (!origin) return callback(null, true);
+
+    const normalizedOrigin = normalizeOrigin(origin);
+
+    if (
+      allowedOrigins.includes(normalizedOrigin) ||
+      vercelPreviewRegex.test(normalizedOrigin)
+    ) {
+      return callback(null, true);
+    }
+
+    return callback(new Error(`CORS blocked for origin: ${origin}`), false);
+  },
   credentials: true,
-}));
+  methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization'],
+};
 
 app.set('trust proxy', 1);
+
+app.use(helmet());
+app.use(cors(corsOptions));
+app.options(/.*/, cors(corsOptions));
 
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true }));
@@ -81,9 +112,9 @@ export const startServer = async () => {
     const httpServer = http.createServer(app);
     initSocket({ httpServer });
 
-    const server = httpServer.listen(PORT, () => {
-      console.log(`Server running: http://localhost:${PORT}`);
-      console.log(` Redis status: ${redis.status}`);
+    const server = httpServer.listen(PORT, '0.0.0.0', () => {
+      console.log(`Server running on port ${PORT}`);
+      console.log(`Redis status: ${redis.status}`);
     });
 
     return server;

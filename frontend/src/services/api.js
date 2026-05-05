@@ -1,7 +1,7 @@
 import axios from 'axios';
 
 const API_URL =
-  import.meta.env.VITE_API_URL 
+  import.meta.env.VITE_API_URL || 'https://sahayatri-p95g.onrender.com/api';
 
 let _accessToken = null;
 
