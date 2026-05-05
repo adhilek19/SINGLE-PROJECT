@@ -2,23 +2,28 @@ import nodemailer from 'nodemailer';
 import { env } from '../config/env.js';
 import { logger } from './logger.js';
 
+const emailPass = String(env.EMAIL_PASS || '').replace(/\s/g, '');
+const emailSecure = String(env.EMAIL_SECURE).toLowerCase() === 'true';
+
 const transporter = nodemailer.createTransport({
-  host: env.EMAIL_HOST,
-  port: Number(env.EMAIL_PORT),
-  secure: Boolean(env.EMAIL_SECURE), // true for 465
+  host: env.EMAIL_HOST || 'smtp.gmail.com',
+  port: Number(env.EMAIL_PORT || 465),
+  secure: emailSecure,
+  family: 4,
   auth: {
     user: env.EMAIL_USER,
-    pass: env.EMAIL_PASS,
+    pass: emailPass,
   },
-  connectionTimeout: 20000,
-  greetingTimeout: 20000,
+  connectionTimeout: 30000,
+  greetingTimeout: 30000,
   socketTimeout: 30000,
+  tls: {
+    servername: env.EMAIL_HOST || 'smtp.gmail.com',
+  },
 });
 
-const getOtpSubject = (type) => {
-  if (type === 'reset') return 'Password reset OTP';
-  return 'Email verification OTP';
-};
+const getOtpSubject = (type) =>
+  type === 'reset' ? 'Password reset OTP' : 'Email verification OTP';
 
 const getOtpHtml = (otp, type) => {
   const title = type === 'reset' ? 'Reset your password' : 'Verify your email';
@@ -30,17 +35,19 @@ const getOtpHtml = (otp, type) => {
       <div style="font-size:32px;font-weight:800;letter-spacing:6px;background:#f3f4f6;padding:16px;text-align:center;border-radius:10px;color:#111827">
         ${otp}
       </div>
-      <p style="color:#6b7280;font-size:13px;margin-top:18px">This OTP expires in 10 minutes.</p>
+      <p style="color:#6b7280;font-size:13px;margin-top:18px">
+        This OTP expires in 10 minutes.
+      </p>
     </div>
   `;
 };
 
 export const sendOtpEmail = async (to, otp, type = 'verify') => {
-  try {
-    const subject = getOtpSubject(type);
+  const subject = getOtpSubject(type);
 
+  try {
     const info = await transporter.sendMail({
-      from: `"SahaYatri" <${env.EMAIL_FROM}>`,
+      from: `"SahaYatri" <${env.EMAIL_USER}>`,
       to,
       subject,
       html: getOtpHtml(otp, type),
@@ -51,6 +58,9 @@ export const sendOtpEmail = async (to, otp, type = 'verify') => {
       to,
       subject,
       messageId: info.messageId,
+      host: env.EMAIL_HOST,
+      port: Number(env.EMAIL_PORT || 465),
+      secure: emailSecure,
     });
 
     return info;
@@ -58,9 +68,16 @@ export const sendOtpEmail = async (to, otp, type = 'verify') => {
     logger.error({
       event: 'email_failed',
       to,
-      subject: getOtpSubject(type),
+      subject,
       error: error.message,
       code: error.code,
+      command: error.command,
+      response: error.response,
+      responseCode: error.responseCode,
+      host: env.EMAIL_HOST,
+      port: Number(env.EMAIL_PORT || 465),
+      secure: emailSecure,
+      user: env.EMAIL_USER,
     });
 
     throw error;
