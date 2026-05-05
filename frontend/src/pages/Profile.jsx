@@ -341,7 +341,7 @@ const Profile = () => {
 
             <section className="rounded-2xl border border-emerald-200 bg-emerald-50 p-4 md:p-5">
               <h2 className="text-xl font-bold flex items-center gap-2"><ShieldCheck className="w-5 h-5 text-emerald-700" />Trusted Contact</h2>
-              <p className="text-sm text-slate-600 mt-1">Ride start aayal share ride link manually ayakkan use cheyyam.</p>
+              <p className="text-sm text-slate-600 mt-1"></p>
               <div className="grid md:grid-cols-3 gap-4 mt-4">
                 <input name="trustedContact.name" value={form.trustedContact.name} onChange={handleChange} className="border rounded-xl p-3 outline-none" placeholder="Name" />
                 <input name="trustedContact.phone" value={form.trustedContact.phone} onChange={handleChange} className="border rounded-xl p-3 outline-none" placeholder="Phone number" />
@@ -363,7 +363,7 @@ const Profile = () => {
               <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
                 <div>
                   <h2 className="text-xl font-bold">Current Location Permission</h2>
-                  <p className="text-sm text-slate-500 mt-1">Browser permission prompt varum. Nearby rides and pickup confirmation use cheyyum.</p>
+                  <p className="text-sm text-slate-500 mt-1"></p>
                   {form.currentLocation?.lat ? <p className="text-sm text-slate-700 mt-2">Lat: {Number(form.currentLocation.lat).toFixed(5)}, Lng: {Number(form.currentLocation.lng).toFixed(5)}</p> : <p className="text-sm text-amber-700 mt-2">No location saved yet.</p>}
                 </div>
                 <button type="button" onClick={handleUpdateLocation} disabled={locationSaving} className="w-full md:w-auto bg-slate-900 text-white px-5 py-3 rounded-xl font-bold hover:bg-slate-800 disabled:opacity-60 flex items-center justify-center gap-2">
