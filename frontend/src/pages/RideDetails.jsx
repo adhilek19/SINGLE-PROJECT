@@ -452,7 +452,7 @@ const RideDetails = () => {
 
         {canTrackLive && (
           <div className="rounded-2xl border border-emerald-200 bg-emerald-50 p-4 text-sm text-emerald-800">
-            Live tracking enabled. Browser location permission prompt varum; allow cheythal driver/passenger location map-il update aavum.
+            
           </div>
         )}
 
