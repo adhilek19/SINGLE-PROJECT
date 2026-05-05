@@ -98,6 +98,22 @@ const formatDuration = (seconds) => {
   return mins ? `${hours} hr ${mins} min` : `${hours} hr`;
 };
 
+const getSpeedKmh = (loc = {}) => {
+  const direct = Number(loc.speedKmh);
+  if (Number.isFinite(direct) && direct >= 0) return direct;
+
+  const speedMps = Number(loc.speed);
+  if (Number.isFinite(speedMps) && speedMps >= 0) return speedMps * 3.6;
+
+  return null;
+};
+
+const formatSpeedKmh = (loc = {}) => {
+  const speed = getSpeedKmh(loc);
+  if (!Number.isFinite(speed)) return 'Speed N/A';
+  return `${Math.round(speed)} km/h`;
+};
+
 const getLocationUser = (loc = {}) => {
   const user = loc.user && typeof loc.user === 'object' ? loc.user : {};
 
@@ -121,7 +137,7 @@ const getInitials = (name = 'User') =>
     .map((word) => word[0]?.toUpperCase() || '')
     .join('') || 'U';
 
-const createUserPhotoIcon = ({ photo, name, role }) => {
+const createUserPhotoIcon = ({ photo, name, role, speedText }) => {
   const initials = getInitials(name);
   const roleClass = role === 'driver' ? 'driver' : 'passenger';
   const safeName = String(name || 'User').replace(/"/g, '&quot;');
@@ -137,10 +153,10 @@ const createUserPhotoIcon = ({ photo, name, role }) => {
             : `<span>${initials}</span>`
         }
       </div>
-      <div class="user-photo-label user-photo-label--${roleClass}">${role === 'driver' ? 'Driver' : 'Passenger'}</div>
+      <div class="user-photo-label user-photo-label--${roleClass}">${role === 'driver' ? 'Driver' : 'Passenger'}${speedText ? ` • ${speedText}` : ''}</div>
     `,
-    iconSize: [58, 74],
-    iconAnchor: [29, 60],
+    iconSize: [92, 78],
+    iconAnchor: [46, 60],
     popupAnchor: [0, -58],
   });
 };
@@ -153,17 +169,20 @@ const LiveLocationMarkers = ({ locations = [] }) => {
       {validLocations.map((loc) => {
         const user = getLocationUser(loc);
         const role = loc.role === 'driver' ? 'driver' : 'passenger';
+        const speedText = formatSpeedKmh(loc);
 
         return (
           <Marker
             key={`${user.id}-${role}-${loc.updatedAt || ''}`}
             position={[Number(loc.lat), Number(loc.lng)]}
-            icon={createUserPhotoIcon({ photo: user.photo, name: user.name, role })}
+            icon={createUserPhotoIcon({ photo: user.photo, name: user.name, role, speedText })}
           >
             <Popup>
               <strong>{user.name}</strong>
               <br />
               {role === 'driver' ? 'Driver live location' : 'Passenger live location'}
+              <br />
+              <strong>{speedText}</strong>
               <br />
               <span>
                 {Number(loc.lat).toFixed(5)}, {Number(loc.lng).toFixed(5)}
@@ -266,7 +285,7 @@ const RouteMap = ({ source, destination, liveLocations = [], height = '360px' })
           </h3>
 
           <p className="text-sm text-slate-500">
-            {loading ? 'Calculating route...' : 'Source, destination and live profile markers'}
+            {loading ? 'Calculating route...' : 'Source, destination, live profile markers and speed'}
           </p>
         </div>
 

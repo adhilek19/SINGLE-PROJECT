@@ -67,12 +67,13 @@ body {
 
 .user-photo-label {
   margin-top: 4px;
-  transform: translateX(-3px);
-  width: 58px;
+  transform: translateX(-20px);
+  min-width: 92px;
   border-radius: 999px;
-  padding: 2px 5px;
+  padding: 2px 7px;
   text-align: center;
   font-size: 10px;
+  white-space: nowrap;
   font-weight: 900;
   color: #ffffff;
   box-shadow: 0 8px 16px rgba(15, 23, 42, 0.22);

@@ -147,7 +147,9 @@ const liveLocationSchema = new mongoose.Schema(
     lat: Number,
     lng: Number,
     heading: Number,
-    speed: Number,
+    speed: Number, // browser speed in m/s when available
+    speedKmh: Number,
+    accuracy: Number,
     updatedAt: Date,
   },
   { _id: false }

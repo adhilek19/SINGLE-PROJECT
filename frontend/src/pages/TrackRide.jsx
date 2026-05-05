@@ -7,6 +7,22 @@ import { rideService } from '../services/api';
 const formatDate = (d) => (d ? new Date(d).toLocaleDateString() : '');
 const formatTime = (d) => (d ? new Date(d).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '');
 
+const getSpeedKmh = (loc = {}) => {
+  const direct = Number(loc.speedKmh);
+  if (Number.isFinite(direct) && direct >= 0) return direct;
+
+  const speedMps = Number(loc.speed);
+  if (Number.isFinite(speedMps) && speedMps >= 0) return speedMps * 3.6;
+
+  return null;
+};
+
+const formatSpeedKmh = (loc = {}) => {
+  const speed = getSpeedKmh(loc);
+  if (!Number.isFinite(speed)) return 'Speed N/A';
+  return `${Math.round(speed)} km/h`;
+};
+
 const TrackRide = () => {
   const { token } = useParams();
   const [ride, setRide] = useState(null);
@@ -14,17 +30,30 @@ const TrackRide = () => {
   const [error, setError] = useState('');
 
   useEffect(() => {
-    const load = async () => {
+    let mounted = true;
+
+    const load = async ({ silent = false } = {}) => {
       try {
         const res = await rideService.getPublicTracking(token);
+        if (!mounted) return;
         setRide(res.data?.data?.ride || null);
+        setError('');
       } catch (err) {
+        if (!mounted) return;
         setError(err?.response?.data?.message || 'Tracking link not found');
       } finally {
-        setLoading(false);
+        if (!mounted) return;
+        if (!silent) setLoading(false);
       }
     };
+
     load();
+    const intervalId = window.setInterval(() => load({ silent: true }), 5000);
+
+    return () => {
+      mounted = false;
+      window.clearInterval(intervalId);
+    };
   }, [token]);
 
   if (loading) return <div className="p-8 text-center">Loading public tracking...</div>;
@@ -77,8 +106,22 @@ const TrackRide = () => {
         <RouteMap source={ride.source} destination={ride.destination} liveLocations={liveLocations} />
 
         {liveLocations.length ? (
-          <div className="rounded-2xl border bg-emerald-50 p-4 text-sm text-emerald-800">
-            Last live update: {new Date(liveLocations[liveLocations.length - 1].updatedAt).toLocaleString()}
+          <div className="rounded-2xl border bg-emerald-50 p-4">
+            <h3 className="font-black text-emerald-900">Live location + speed</h3>
+            <div className="mt-3 grid gap-3 md:grid-cols-2">
+              {liveLocations.map((loc) => (
+                <div key={`${loc.user || loc.userId || loc.role}-${loc.updatedAt}`} className="rounded-2xl border bg-white p-4 text-sm">
+                  <div className="flex items-center justify-between gap-2">
+                    <div>
+                      <p className="font-black text-slate-900">{loc.name || (loc.role === 'driver' ? 'Driver' : 'Passenger')}</p>
+                      <p className="text-xs font-bold uppercase text-slate-500">{loc.role === 'driver' ? 'Driver' : 'Passenger'}</p>
+                    </div>
+                    <span className="rounded-full bg-slate-900 px-3 py-1 text-xs font-black text-white">{formatSpeedKmh(loc)}</span>
+                  </div>
+                  <p className="mt-2 text-xs text-slate-600">Updated: {new Date(loc.updatedAt).toLocaleString()}</p>
+                </div>
+              ))}
+            </div>
           </div>
         ) : (
           <div className="rounded-2xl border bg-amber-50 p-4 text-sm text-amber-800">Live location will appear after driver/passenger opens ride details and allows location permission.</div>

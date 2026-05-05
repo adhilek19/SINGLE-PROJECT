@@ -562,13 +562,13 @@ export const rideRepository = {
 
   findUserRides,
 
-  updateLiveLocation({ rideId, userId, role, lat, lng, heading = null, speed = null, name = '', profilePic = '', updatedAt = new Date() }) {
+  updateLiveLocation({ rideId, userId, role, lat, lng, heading = null, speed = null, speedKmh = null, name = '', profilePic = '', updatedAt = new Date() }) {
     return Ride.findById(rideId).then(async (ride) => {
       if (!ride) return null;
       ride.lastLiveLocations = (ride.lastLiveLocations || []).filter(
         (loc) => loc.user?.toString() !== userId.toString()
       );
-      ride.lastLiveLocations.push({ user: userId, role, name, profilePic, lat, lng, heading, speed, updatedAt });
+      ride.lastLiveLocations.push({ user: userId, role, name, profilePic, lat, lng, heading, speed, speedKmh, updatedAt });
       if (ride.lastLiveLocations.length > 10) {
         ride.lastLiveLocations = ride.lastLiveLocations.slice(-10);
       }

@@ -1,4 +1,4 @@
-import './src/config/env.js'; 
+import './src/config/env.js'; // ✅ FIXED
 
 import express from 'express';
 import http from 'http';
@@ -22,7 +22,7 @@ import meRoutes from './src/routes/meRoutes.js';
 import rideRequestRoutes from './src/routes/rideRequestRoutes.js';
 import { initSocket } from './src/socket/socketServer.js';
 
-import './src/config/passport.js'; 
+import './src/config/passport.js'; // ✅ this is already correct
 
 const app = express();
 

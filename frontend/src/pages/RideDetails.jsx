@@ -44,6 +44,27 @@ const toId = (val) => (val && typeof val === 'object' ? val._id : val)?.toString
 const formatDate = (d) => (d ? new Date(d).toLocaleDateString() : '');
 const formatTime = (d) => (d ? new Date(d).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '');
 
+const getSpeedKmh = (loc = {}) => {
+  const direct = Number(loc.speedKmh);
+  if (Number.isFinite(direct) && direct >= 0) return direct;
+
+  const speedMps = Number(loc.speed);
+  if (Number.isFinite(speedMps) && speedMps >= 0) return speedMps * 3.6;
+
+  return null;
+};
+
+const formatSpeedKmh = (loc = {}) => {
+  const speed = getSpeedKmh(loc);
+  if (!Number.isFinite(speed)) return 'Speed N/A';
+  return `${Math.round(speed)} km/h`;
+};
+
+const formatLiveTime = (value) => {
+  if (!value) return 'Waiting for update';
+  return new Date(value).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+};
+
 const Badge = ({ children, tone = 'slate' }) => {
   const styles = {
     slate: 'bg-slate-100 text-slate-700',
@@ -87,6 +108,47 @@ const ProfileLink = ({ user, fallback = 'User', className = '' }) => {
     <Link to={`/users/${id}`} className={`font-black text-blue-700 hover:text-blue-900 ${className}`}>
       {name}
     </Link>
+  );
+};
+
+
+const LiveLocationCard = ({ location, fallbackRole }) => {
+  const role = location?.role || fallbackRole || 'user';
+  const title = role === 'driver' ? 'Driver live location' : 'Passenger live location';
+  const name = location?.name || (role === 'driver' ? 'Driver' : 'Passenger');
+
+  return (
+    <div className="rounded-2xl border bg-white p-4 shadow-sm">
+      <div className="flex items-center justify-between gap-3">
+        <div className="min-w-0">
+          <p className="text-xs font-black uppercase tracking-wide text-slate-500">{title}</p>
+          <p className="truncate font-black text-slate-900">{name}</p>
+        </div>
+        <span className={`rounded-full px-3 py-1 text-xs font-black ${role === 'driver' ? 'bg-emerald-100 text-emerald-700' : 'bg-purple-100 text-purple-700'}`}>
+          {role === 'driver' ? 'Driver' : 'Passenger'}
+        </span>
+      </div>
+
+      {location?.lat && location?.lng ? (
+        <div className="mt-3 grid grid-cols-2 gap-2 text-sm">
+          <div className="rounded-xl bg-slate-50 p-3">
+            <p className="text-xs font-bold text-slate-500">Speed</p>
+            <p className="text-lg font-black text-slate-900">{formatSpeedKmh(location)}</p>
+          </div>
+          <div className="rounded-xl bg-slate-50 p-3">
+            <p className="text-xs font-bold text-slate-500">Updated</p>
+            <p className="text-sm font-black text-slate-900">{formatLiveTime(location.updatedAt)}</p>
+          </div>
+          <div className="col-span-2 rounded-xl bg-slate-50 p-3 text-xs text-slate-600">
+            GPS: {Number(location.lat).toFixed(5)}, {Number(location.lng).toFixed(5)}
+          </div>
+        </div>
+      ) : (
+        <p className="mt-3 rounded-xl bg-amber-50 p-3 text-sm font-semibold text-amber-800">
+          Waiting for location permission from this user.
+        </p>
+      )}
+    </div>
   );
 };
 
@@ -168,6 +230,25 @@ const RideDetails = () => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [ride?._id, token]);
 
+  useEffect(() => {
+    if (!Array.isArray(ride?.lastLiveLocations)) return;
+
+    setLiveLocationsByUser((prev) => {
+      const next = { ...prev };
+
+      ride.lastLiveLocations.forEach((loc, index) => {
+        const key = toId(loc.user) || loc.userId || `${loc.role || 'user'}-${index}`;
+        next[key] = {
+          ...loc,
+          userId: key,
+          role: loc.role || 'passenger',
+        };
+      });
+
+      return next;
+    });
+  }, [ride?.lastLiveLocations]);
+
   const canTrackLive = Boolean(token && ride?._id && (isDriver || isPassenger || myLatestRequest?.status === 'accepted'));
 
   useEffect(() => {
@@ -202,6 +283,8 @@ const RideDetails = () => {
           lng: payload.lng,
           heading: payload.heading ?? null,
           speed: payload.speed ?? null,
+          speedKmh: payload.speedKmh ?? null,
+          accuracy: payload.accuracy ?? null,
           updatedAt: new Date().toISOString(),
         },
       }));
@@ -398,6 +481,8 @@ const RideDetails = () => {
   const vehicle = ride.vehicle || {};
   const preferences = ride.preferences || {};
   const verified = driver.verification || {};
+  const driverLiveLocation = liveLocations.find((loc) => loc.role === 'driver');
+  const passengerLiveLocations = liveLocations.filter((loc) => loc.role === 'passenger');
 
   return (
     <div className="flex-grow bg-slate-50 py-8 px-4">
@@ -468,8 +553,25 @@ const RideDetails = () => {
         </div>
 
         {canTrackLive && (
-          <div className="rounded-2xl border border-emerald-200 bg-emerald-50 p-4 text-sm text-emerald-800">
-            
+          <div className="space-y-4 rounded-2xl border border-emerald-200 bg-emerald-50 p-4">
+            <div>
+              <h3 className="font-black text-emerald-900">Live tracking active</h3>
+              <p className="text-sm font-semibold text-emerald-800">
+                Passenger can see driver live location. Driver can see accepted passenger live location. Speed is shown in km/h.
+              </p>
+            </div>
+
+            <div className="grid gap-3 md:grid-cols-2">
+              <LiveLocationCard location={driverLiveLocation} fallbackRole="driver" />
+
+              {passengerLiveLocations.length ? (
+                passengerLiveLocations.map((loc) => (
+                  <LiveLocationCard key={loc.userId || loc.user || loc.updatedAt} location={loc} fallbackRole="passenger" />
+                ))
+              ) : (
+                <LiveLocationCard fallbackRole="passenger" />
+              )}
+            </div>
           </div>
         )}
 

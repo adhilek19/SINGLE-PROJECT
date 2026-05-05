@@ -8,6 +8,41 @@ import RideRequest from '../models/RideRequest.js';
 const ROOM_PREFIX = 'ride:';
 const roomName = (rideId) => `${ROOM_PREFIX}${rideId}`;
 
+const normalizeOrigin = (origin = '') => String(origin).trim().replace(/\/+$/, '');
+
+const allowedOrigins = [
+  'http://localhost:5173',
+  'http://localhost:5174',
+  env.CLIENT_URL,
+  ...(env.CLIENT_URLS ? env.CLIENT_URLS.split(',') : []),
+]
+  .map(normalizeOrigin)
+  .filter(Boolean);
+
+const vercelPreviewRegex =
+  /^https:\/\/saha-yatri-[a-z0-9-]+-adhilek100-3295s-projects\.vercel\.app$/i;
+
+const isAllowedOrigin = (origin) => {
+  if (!origin) return true;
+  const normalizedOrigin = normalizeOrigin(origin);
+  return allowedOrigins.includes(normalizedOrigin) || vercelPreviewRegex.test(normalizedOrigin);
+};
+
+const toKmh = (speedMps) => {
+  const n = Number(speedMps);
+  if (!Number.isFinite(n) || n < 0) return null;
+  return Number((n * 3.6).toFixed(1));
+};
+
+const cleanSpeedKmh = ({ speed, speedKmh }) => {
+  const directKmh = Number(speedKmh);
+  if (Number.isFinite(directKmh) && directKmh >= 0 && directKmh <= 250) {
+    return Number(directKmh.toFixed(1));
+  }
+
+  return toKmh(speed);
+};
+
 const validLat = (lat) => Number.isFinite(lat) && lat >= -90 && lat <= 90;
 const validLng = (lng) => Number.isFinite(lng) && lng >= -180 && lng <= 180;
 
@@ -42,7 +77,10 @@ const resolveRideRole = async ({ rideId, user }) => {
 export const initSocket = ({ httpServer }) => {
   const io = new Server(httpServer, {
     cors: {
-      origin: env.CLIENT_URL,
+      origin(origin, callback) {
+        if (isAllowedOrigin(origin)) return callback(null, true);
+        return callback(new Error(`Socket CORS blocked for origin: ${origin}`), false);
+      },
       credentials: true,
     },
   });
@@ -108,6 +146,11 @@ export const initSocket = ({ httpServer }) => {
           payload.speed === undefined || payload.speed === null
             ? null
             : Number(payload.speed);
+        const accuracy =
+          payload.accuracy === undefined || payload.accuracy === null
+            ? null
+            : Number(payload.accuracy);
+        const speedKmh = cleanSpeedKmh({ speed, speedKmh: payload.speedKmh });
 
         if (!rideId) throw new Error('rideId is required');
         if (!validLat(lat) || !validLng(lng)) {
@@ -141,6 +184,8 @@ export const initSocket = ({ httpServer }) => {
             lng,
             heading: Number.isFinite(heading) ? heading : null,
             speed: Number.isFinite(speed) ? speed : null,
+            speedKmh,
+            accuracy: Number.isFinite(accuracy) ? accuracy : null,
             updatedAt,
           });
           if (rideDoc.lastLiveLocations.length > 10) {
@@ -162,6 +207,8 @@ export const initSocket = ({ httpServer }) => {
           lng,
           heading: Number.isFinite(heading) ? heading : null,
           speed: Number.isFinite(speed) ? speed : null,
+          speedKmh,
+          accuracy: Number.isFinite(accuracy) ? accuracy : null,
           updatedAt,
         };
 
