@@ -4,54 +4,65 @@ import { logger } from './logger.js';
 
 const transporter = nodemailer.createTransport({
   host: env.EMAIL_HOST,
-  port: env.EMAIL_PORT,
-  secure: env.EMAIL_PORT === 465,
+  port: Number(env.EMAIL_PORT),
+  secure: Boolean(env.EMAIL_SECURE), // true for 465
   auth: {
     user: env.EMAIL_USER,
     pass: env.EMAIL_PASS,
   },
+  connectionTimeout: 20000,
+  greetingTimeout: 20000,
+  socketTimeout: 30000,
 });
 
-const sendMail = async ({ to, subject, html }) => {
-  try {
-    const info = await transporter.sendMail({
-      from: `"MyApp" <${env.EMAIL_FROM}>`,
-      to,
-      subject,
-      html,
-    });
-
-    logger.info({ event: 'email_sent', to, subject, messageId: info.messageId });
-  } catch (err) {
-    logger.error({ event: 'email_failed', to, subject, error: err.message });
-    throw err;
-  }
+const getOtpSubject = (type) => {
+  if (type === 'reset') return 'Password reset OTP';
+  return 'Email verification OTP';
 };
 
-export const sendOtpEmail = (to, otp, purpose) => {
-  const isVerification = purpose === 'verify';
-  const subject = isVerification ? 'Email verification OTP' : 'Password reset OTP';
-  const heading = isVerification ? 'Verify your email' : 'Reset your password';
-  const intro = isVerification
-    ? 'Use this OTP to verify your account.'
-    : 'Use this OTP to reset your password.';
+const getOtpHtml = (otp, type) => {
+  const title = type === 'reset' ? 'Reset your password' : 'Verify your email';
 
-  return sendMail({
-    to,
-    subject,
-    html: `
-      <div style="font-family: sans-serif; max-width: 480px; margin: auto; padding: 32px;">
-        <h2 style="margin-bottom: 8px;">${heading}</h2>
-        <p style="color: #555; line-height: 1.6;">
-          ${intro} This OTP expires in <strong>10 minutes</strong>.
-        </p>
-        <div style="margin: 24px 0; padding: 16px; background: #f5f5f5; border-radius: 8px; text-align: center;">
-          <span style="font-size: 28px; font-weight: 700; letter-spacing: 8px;">${otp}</span>
-        </div>
-        <p style="color: #777; font-size: 14px; line-height: 1.6;">
-          If you did not request this, you can ignore this email.
-        </p>
+  return `
+    <div style="font-family:Arial,sans-serif;max-width:520px;margin:auto;padding:24px;border:1px solid #e5e7eb;border-radius:14px">
+      <h2 style="margin:0 0 12px;color:#111827">${title}</h2>
+      <p style="color:#4b5563">Use this OTP to continue:</p>
+      <div style="font-size:32px;font-weight:800;letter-spacing:6px;background:#f3f4f6;padding:16px;text-align:center;border-radius:10px;color:#111827">
+        ${otp}
       </div>
-    `,
-  });
+      <p style="color:#6b7280;font-size:13px;margin-top:18px">This OTP expires in 10 minutes.</p>
+    </div>
+  `;
+};
+
+export const sendOtpEmail = async (to, otp, type = 'verify') => {
+  try {
+    const subject = getOtpSubject(type);
+
+    const info = await transporter.sendMail({
+      from: `"SahaYatri" <${env.EMAIL_FROM}>`,
+      to,
+      subject,
+      html: getOtpHtml(otp, type),
+    });
+
+    logger.info({
+      event: 'email_sent',
+      to,
+      subject,
+      messageId: info.messageId,
+    });
+
+    return info;
+  } catch (error) {
+    logger.error({
+      event: 'email_failed',
+      to,
+      subject: getOtpSubject(type),
+      error: error.message,
+      code: error.code,
+    });
+
+    throw error;
+  }
 };
