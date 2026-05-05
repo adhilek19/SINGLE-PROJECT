@@ -77,6 +77,19 @@ const PreferencePill = ({ active, children }) => (
   <span className={`rounded-full px-3 py-1 text-xs font-bold ${active ? 'bg-blue-100 text-blue-700' : 'bg-slate-100 text-slate-500'}`}>{children}</span>
 );
 
+const ProfileLink = ({ user, fallback = 'User', className = '' }) => {
+  const id = toId(user);
+  const name = user?.name || fallback;
+
+  if (!id) return <span className={className}>{name}</span>;
+
+  return (
+    <Link to={`/users/${id}`} className={`font-black text-blue-700 hover:text-blue-900 ${className}`}>
+      {name}
+    </Link>
+  );
+};
+
 const RideDetails = () => {
   const { id } = useParams();
   const navigate = useNavigate();
@@ -406,7 +419,11 @@ const RideDetails = () => {
             <div><p className="font-bold">To</p><p>{ride.destination?.name}</p></div>
             <div className="rounded-2xl border bg-slate-50 p-4">
               <p className="font-black flex items-center gap-2"><BadgeCheck className="w-5 h-5 text-blue-600" /> Driver / Passenger Trust</p>
-              <p className="text-sm mt-2">Driver: {driver?.name || 'Unknown'} ({driver?.rating ?? 0}/5)</p>
+              <p className="text-sm mt-2">
+                Driver:{' '}
+                <ProfileLink user={driver} fallback="Unknown driver" />
+                {' '}({driver?.rating ?? 0}/5)
+              </p>
               <div className="flex flex-wrap gap-2 mt-3">
                 <Badge tone={driver?.isVerified ? 'green' : 'amber'}>Email {driver?.isVerified ? 'verified' : 'pending'}</Badge>
                 <Badge tone={verified.phone ? 'green' : 'slate'}>Phone {verified.phone ? 'verified' : 'pending'}</Badge>
@@ -522,7 +539,10 @@ const RideDetails = () => {
             {requestsLoading ? <p className="text-sm text-slate-500">Loading requests...</p> : null}
             {pendingRequests.length ? pendingRequests.map((req) => (
               <div key={req._id} className="border rounded-2xl p-4 bg-slate-50 space-y-2">
-                <p className="text-sm font-black">{req.passenger?.name || 'Passenger'} {req.passenger?.isVerified ? '✅' : ''}</p>
+                <p className="text-sm">
+                  <ProfileLink user={req.passenger} fallback="Passenger" />
+                  {req.passenger?.isVerified ? ' ✅' : ''}
+                </p>
                 <p className="text-xs text-slate-600">Seats requested: {req.seatsRequested}</p>
                 {req.pickupLocation?.name ? <p className="text-xs">Pickup: {req.pickupLocation.name}</p> : null}
                 {req.pickupLocation?.lat ? <p className="text-xs text-emerald-700">Pickup GPS confirmed</p> : null}
@@ -540,7 +560,10 @@ const RideDetails = () => {
                 <h4 className="font-bold">Accepted Passengers</h4>
                 {acceptedRequests.map((req) => (
                   <div key={req._id} className="flex flex-wrap items-center justify-between gap-2 rounded-xl border p-3 text-sm">
-                    <span>{req.passenger?.name || 'Passenger'} · seats {req.seatsRequested} · PIN verified: {req.pinVerified ? 'Yes ✅' : 'No'}</span>
+                    <span>
+                      <ProfileLink user={req.passenger} fallback="Passenger" />
+                      {' '}· seats {req.seatsRequested} · PIN verified: {req.pinVerified ? 'Yes ✅' : 'No'}
+                    </span>
                     <button onClick={() => handleMarkNoShow(req._id)} className="rounded-lg bg-amber-600 px-3 py-1 font-bold text-white">Mark no-show</button>
                   </div>
                 ))}

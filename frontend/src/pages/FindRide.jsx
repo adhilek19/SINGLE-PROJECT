@@ -63,7 +63,17 @@ const RideCard = ({ ride }) => {
           </h3>
 
           <p className="mt-1 text-sm text-slate-500">
-            by {driver.name || 'Unknown driver'}
+            by{' '}
+            {driver._id ? (
+              <Link
+                to={`/users/${driver._id}`}
+                className="font-bold text-blue-600 hover:text-blue-700"
+              >
+                {driver.name || 'Driver'}
+              </Link>
+            ) : (
+              driver.name || 'Unknown driver'
+            )}
           </p>
         </div>
 

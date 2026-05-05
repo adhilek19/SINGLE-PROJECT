@@ -4,6 +4,7 @@ import { AppError, NotFound } from '../utils/AppError.js';
 import { env } from '../config/env.js';
 import { userRepository } from '../repositories/userRepository.js';
 import { Review } from '../models/Review.js';
+import Ride from '../models/Ride.js';
 
 const cookieOptions = () => ({
   httpOnly: true,
@@ -50,6 +51,34 @@ const normalizeUserForClient = (userDoc) => {
   const user = userDoc.toObject ? userDoc.toObject() : { ...userDoc };
   user.currentLocation = toClientLocation(user.currentLocation);
   return user;
+};
+
+const sanitizePublicRide = (rideDoc) => {
+  if (!rideDoc) return null;
+
+  const ride = rideDoc.toObject ? rideDoc.toObject() : { ...rideDoc };
+  const vehicle = ride.vehicle || {};
+
+  return {
+    _id: ride._id,
+    driver: ride.driver,
+    source: ride.source,
+    destination: ride.destination,
+    departureTime: ride.departureTime,
+    estimatedEndTime: ride.estimatedEndTime,
+    status: ride.status,
+    price: ride.price,
+    vehicle: {
+      type: vehicle.type || '',
+      brand: vehicle.brand || '',
+      model: vehicle.model || '',
+      image: vehicle.image || '',
+      verified: Boolean(vehicle.verified),
+    },
+    seatsAvailable: ride.seatsAvailable,
+    bookedSeats: ride.bookedSeats,
+    createdAt: ride.createdAt,
+  };
 };
 
 const toGeoLocation = (location) => {
@@ -301,14 +330,64 @@ export const getPublicProfile = async (req, res, next) => {
       throw NotFound('User not found');
     }
 
-    const reviews = await Review.find({ reviewee: req.params.id })
-      .populate('reviewer', 'name profilePic isVerified')
-      .sort('-createdAt')
-      .limit(10);
+    const publicRideStatuses = ['scheduled', 'started', 'ended', 'completed'];
+
+    const [
+      reviews,
+      recentDriverRides,
+      recentPassengerRides,
+      driverRideCount,
+      passengerRideCount,
+    ] = await Promise.all([
+      Review.find({ reviewee: req.params.id })
+        .populate('reviewer', 'name profilePic isVerified')
+        .sort('-createdAt')
+        .limit(10),
+
+      Ride.find({
+        driver: req.params.id,
+        status: { $in: publicRideStatuses },
+      })
+        .select(
+          'driver source destination departureTime estimatedEndTime status price vehicle seatsAvailable bookedSeats createdAt'
+        )
+        .sort({ departureTime: -1 })
+        .limit(6)
+        .lean(),
+
+      Ride.find({
+        'passengers.user': req.params.id,
+        status: 'completed',
+      })
+        .populate('driver', 'name profilePic rating rideCount isVerified')
+        .select(
+          'driver source destination departureTime estimatedEndTime status price vehicle createdAt'
+        )
+        .sort({ departureTime: -1 })
+        .limit(6)
+        .lean(),
+
+      Ride.countDocuments({
+        driver: req.params.id,
+        status: { $in: publicRideStatuses },
+      }),
+
+      Ride.countDocuments({
+        'passengers.user': req.params.id,
+        status: 'completed',
+      }),
+    ]);
 
     return successResponse(res, 200, 'Public profile fetched', {
       user: normalizeUserForClient(user),
       reviews,
+      recentDriverRides: recentDriverRides.map(sanitizePublicRide),
+      recentPassengerRides: recentPassengerRides.map(sanitizePublicRide),
+      stats: {
+        driverRideCount,
+        passengerRideCount,
+        reviewCount: reviews.length,
+      },
     });
   } catch (err) {
     next(err);
