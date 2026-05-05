@@ -3,10 +3,7 @@ import joi from 'joi';
 
 const envSchema = joi
   .object({
-    NODE_ENV: joi
-      .string()
-      .valid('development', 'production', 'test')
-      .default('development'),
+    NODE_ENV: joi.string().valid('development', 'production', 'test').default('development'),
     PORT: joi.number().default(5000),
     BACKEND_URL: joi.string().uri().default('http://localhost:5000'),
     SERVER_URL: joi.string().uri().optional(),
@@ -20,40 +17,61 @@ const envSchema = joi
     REFRESH_EXPIRES_IN: joi.string().default('7d'),
 
     EMAIL_HOST: joi.string().default('smtp.gmail.com'),
-    EMAIL_PORT: joi.number().default(587),
-    // Do NOT default this to true. For Gmail 587 it must be false/starttls.
-    // If omitted, src/utils/email.js infers true only for port 465.
+    // Gmail STARTTLS uses 587 + secure=false. Port 465 uses secure=true.
+    EMAIL_PORT: joi.number().valid(465, 587).default(587),
     EMAIL_SECURE: joi.boolean().truthy('true').falsy('false').optional(),
     EMAIL_USER: joi.string().required(),
     EMAIL_PASS: joi.string().required(),
     EMAIL_FROM: joi.string().allow('').optional(),
-    DEV_SHOW_OTP: joi.boolean().truthy('true').falsy('false').default(false),
+    // In development/local, OTP endpoints should not break the whole auth flow
+    // when SMTP is blocked by hosting/network. In production keep this false.
+    EMAIL_FAIL_OPEN: joi.boolean().truthy('true').falsy('false').optional(),
+    EMAIL_LOG_OTP: joi.boolean().truthy('true').falsy('false').optional(),
 
     GOOGLE_CLIENT_ID: joi.string().required(),
     GOOGLE_CLIENT_SECRET: joi.string().required(),
     GOOGLE_CALLBACK_URL: joi.string().uri().optional(),
 
-    REDIS_URL: joi.string().uri().allow('').optional(),
+    REDIS_URL: joi.string().uri().required(),
 
     CLOUDINARY_CLOUD_NAME: joi.string().required(),
     CLOUDINARY_API_KEY: joi.string().required(),
     CLOUDINARY_API_SECRET: joi.string().required(),
   })
-  .unknown(true);
+  .unknown();
 
 const { error, value } = envSchema.validate(process.env, {
   abortEarly: false,
-  stripUnknown: false,
+  convert: true,
 });
 
 if (error) {
   throw new Error(`ENV validation failed: ${error.message}`);
 }
 
+const port = Number(value.EMAIL_PORT || 587);
+
+// If EMAIL_SECURE is not explicitly set, choose the correct value by port.
+// 465 = implicit TLS true, 587 = STARTTLS false.
+if (value.EMAIL_SECURE === undefined) {
+  value.EMAIL_SECURE = port === 465;
+}
+
+// Development fallback only. Set EMAIL_FAIL_OPEN=false in production.
+if (value.EMAIL_FAIL_OPEN === undefined) {
+  value.EMAIL_FAIL_OPEN = value.NODE_ENV !== 'production';
+}
+
+if (value.EMAIL_LOG_OTP === undefined) {
+  value.EMAIL_LOG_OTP = value.NODE_ENV !== 'production';
+}
+
+if (!value.EMAIL_FROM) {
+  value.EMAIL_FROM = `SahaYatri <${value.EMAIL_USER}>`;
+}
+
 export const env = value;
 
-const backendBase = (env.BACKEND_URL || env.SERVER_URL || 'http://localhost:5000').replace(/\/$/, '');
-
 if (!env.GOOGLE_CALLBACK_URL) {
-  env.GOOGLE_CALLBACK_URL = `${backendBase}/api/auth/google/callback`;
+  env.GOOGLE_CALLBACK_URL = `${env.BACKEND_URL.replace(/\/$/, '')}/api/auth/google/callback`;
 }

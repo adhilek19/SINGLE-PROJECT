@@ -28,9 +28,11 @@ router.post(
 );
 router.get('/user/me', protect, rideController.getUserRides);
 
+// Public discovery: Find Ride page should work before login.
 router.get('/nearby', rideController.getNearbyRides);
 router.get('/track/:token', rideController.getPublicTracking);
-router.get('/match', protect, rideController.getMatchedRides);
+// Public matching result; joining/requesting still needs login.
+router.get('/match', rideController.getMatchedRides);
 
 router.post('/:rideId/requests', protect, rideRequestController.createRideRequest);
 router.get('/:rideId/requests', protect, rideRequestController.getRideRequests);

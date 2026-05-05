@@ -1,14 +1,14 @@
 import axios from 'axios';
 
 const API_URL =
-  import.meta.env.VITE_API_URL || 'http://localhost:5000/api';
+  import.meta.env.VITE_API_URL || 'https://sahayatri-p95g.onrender.com/api';
 
 let _accessToken = null;
 
 export const tokenStore = {
   get: () => _accessToken,
-  set: (token) => {
-    _accessToken = token || null;
+  set: (t) => {
+    _accessToken = t;
   },
   clear: () => {
     _accessToken = null;
@@ -26,27 +26,11 @@ api.interceptors.request.use((config) => {
   const token = tokenStore.get();
 
   if (token) {
-    config.headers = config.headers || {};
     config.headers.Authorization = `Bearer ${token}`;
   }
 
   return config;
 });
-
-const shouldSkipRefresh = (url = '') => {
-  const cleanUrl = String(url);
-
-  return [
-    '/auth/login',
-    '/auth/register',
-    '/auth/verify-otp',
-    '/auth/resend-verification-otp',
-    '/auth/forgot-password',
-    '/auth/reset-password',
-    '/auth/refresh-token',
-    '/auth/google',
-  ].some((path) => cleanUrl.includes(path));
-};
 
 api.interceptors.response.use(
   (response) => response,
@@ -57,9 +41,28 @@ api.interceptors.response.use(
       return Promise.reject(error);
     }
 
+    const url = originalRequest.url || '';
+
+    // Do not try refresh-token for auth endpoints or public discovery endpoints.
+    // Otherwise login/register/forgot failures create extra /refresh-token 401 spam.
+    const skipRefreshFor = [
+      '/auth/login',
+      '/auth/register',
+      '/auth/verify-otp',
+      '/auth/resend-verification-otp',
+      '/auth/forgot-password',
+      '/auth/reset-password',
+      '/auth/refresh-token',
+      '/rides/nearby',
+      '/rides/search',
+      '/rides/match',
+    ];
+
+    const shouldSkipRefresh = skipRefreshFor.some((path) => url.includes(path));
+
     if (
       error.response.status !== 401 ||
-      shouldSkipRefresh(originalRequest.url) ||
+      shouldSkipRefresh ||
       originalRequest._retry
     ) {
       return Promise.reject(error);
@@ -71,7 +74,7 @@ api.interceptors.response.use(
       if (!refreshPromise) {
         refreshPromise = api
           .post('/auth/refresh-token')
-          .then((res) => res.data?.data?.accessToken || res.data?.accessToken)
+          .then((res) => res.data?.data?.accessToken)
           .finally(() => {
             refreshPromise = null;
           });
@@ -87,10 +90,10 @@ api.interceptors.response.use(
       originalRequest.headers.Authorization = `Bearer ${newToken}`;
 
       return api(originalRequest);
-    } catch (refreshError) {
+    } catch {
       tokenStore.clear();
       localStorage.removeItem('authUser');
-      return Promise.reject(refreshError);
+      return Promise.reject(error);
     }
   }
 );
@@ -136,9 +139,15 @@ export const rideService = {
   },
 
   getRides: (params) => api.get('/rides', { params }),
+
   searchRides: (params) => api.get('/rides/search', { params }),
+
+  // ✅ NEW: Nearby ride discovery
   nearbyRides: (params) => api.get('/rides/nearby', { params }),
+
+  // ✅ NEW: Ride matching
   matchRides: (params) => api.get('/rides/match', { params }),
+
   getRideById: (id) => api.get(`/rides/${id}`),
   getPublicTracking: (token) => api.get(`/rides/track/${token}`),
 

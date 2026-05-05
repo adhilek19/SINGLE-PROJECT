@@ -8,7 +8,7 @@ const Register = () => {
   const navigate = useNavigate();
 
   const backendBase = (
-    import.meta.env.VITE_BACKEND_URL || 'http://localhost:5000'
+    import.meta.env.VITE_BACKEND_URL || 'https://sahayatri-p95g.onrender.com'
   ).replace(/\/$/, '');
 
   const oauthGoogleUrl = `${backendBase}/api/auth/google`;
@@ -32,12 +32,20 @@ const Register = () => {
     setLoading(true);
 
     try {
-      await authService.register(formData);
-      toast.success('Registration successful! Please verify your email.');
+      const response = await authService.register(formData);
+      const devOtp = response.data?.data?.devOtp;
+
+      if (devOtp) {
+        toast.success(`SMTP failed. Development OTP: ${devOtp}`);
+      } else {
+        toast.success('Registration successful! Please verify your email.');
+      }
+
       navigate('/otp', {
         state: {
           email: formData.email,
           type: 'register',
+          devOtp,
         },
       });
     } catch (error) {

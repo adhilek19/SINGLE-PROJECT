@@ -8,7 +8,7 @@ import passport from 'passport';
 import helmet from 'helmet';
 
 import { connectDB } from './src/config/db.js';
-import { connectRedis, redis } from './src/utils/redis.js';
+import { redis } from './src/utils/redis.js';
 import { env } from './src/config/env.js';
 import { errorHandler, notFoundHandler } from './src/middleware/errorHandler.js';
 import { requestId } from './src/middleware/requestId.js'; 
@@ -101,10 +101,10 @@ export const startServer = async () => {
     console.log('✅ MongoDB connected');
 
     try {
-      const redisReady = await connectRedis();
-      console.log(redisReady ? 'Redis connected' : 'Redis unavailable → using in-memory fallback');
+      await redis.connect();
+      console.log('Redis connected');
     } catch (err) {
-      console.warn('Redis failed → using in-memory fallback:', err.message);
+      console.warn('Redis failed → running without cache');
     }
 
     const PORT = env.PORT || 5000;

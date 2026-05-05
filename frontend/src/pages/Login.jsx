@@ -10,7 +10,7 @@ const Login = () => {
   const dispatch = useDispatch();
 
   const backendBase = (
-    import.meta.env.VITE_BACKEND_URL || 'http://localhost:5000'
+    import.meta.env.VITE_BACKEND_URL || 'https://sahayatri-p95g.onrender.com'
   ).replace(/\/$/, '');
 
   const oauthGoogleUrl = `${backendBase}/api/auth/google`;

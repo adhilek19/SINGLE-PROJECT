@@ -13,9 +13,16 @@ const ForgotPassword = () => {
     e.preventDefault();
     setLoading(true);
     try {
-      await authService.forgotPassword({ email });
-      toast.success('OTP sent to your email!');
-      navigate('/otp', { state: { email, type: 'forgot_password' } });
+      const response = await authService.forgotPassword({ email });
+      const devOtp = response.data?.data?.devOtp;
+
+      if (devOtp) {
+        toast.success(`SMTP failed. Development OTP: ${devOtp}`);
+      } else {
+        toast.success('OTP sent to your email!');
+      }
+
+      navigate('/otp', { state: { email, type: 'forgot_password', devOtp } });
     } catch (error) {
       toast.error(error.response?.data?.message || 'Failed to send OTP');
     } finally {

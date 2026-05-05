@@ -13,6 +13,7 @@ const OTP = () => {
 
   const email = location.state?.email || '';
   const type = location.state?.type || 'register';
+  const [devOtp, setDevOtp] = useState(location.state?.devOtp || '');
 
   useEffect(() => {
     if (!email) {
@@ -45,8 +46,16 @@ const OTP = () => {
 
   const handleResend = async () => {
     try {
-      await authService.resendOtp({ email });
-      toast.success('OTP resent successfully!');
+      const response = await authService.resendOtp({ email });
+      const newDevOtp = response.data?.data?.devOtp;
+
+      if (newDevOtp) {
+        setDevOtp(newDevOtp);
+        toast.success(`SMTP failed. Development OTP: ${newDevOtp}`);
+      } else {
+        setDevOtp('');
+        toast.success('OTP resent successfully!');
+      }
     } catch (error) {
       toast.error(error.response?.data?.message || 'Failed to resend OTP');
     }
@@ -89,6 +98,20 @@ const OTP = () => {
           <p className="text-slate-500">
             We sent a verification code to {email}. Enter it below.
           </p>
+
+          {devOtp && (
+            <div className="mt-4 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-left">
+              <p className="text-xs font-semibold uppercase tracking-wide text-amber-700">
+                Development OTP
+              </p>
+              <p className="mt-1 text-2xl font-extrabold tracking-[0.35em] text-amber-900">
+                {devOtp}
+              </p>
+              <p className="mt-1 text-xs text-amber-700">
+                SMTP email failed, so backend returned this OTP for testing. Disable EMAIL_FAIL_OPEN in production.
+              </p>
+            </div>
+          )}
         </div>
 
         <form onSubmit={handleSubmit} className="space-y-8">

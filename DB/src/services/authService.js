@@ -1,7 +1,8 @@
 import crypto from 'crypto';
 
 import { userRepository } from '../repositories/userRepository.js';
-import { sendOtpEmail } from '../utils/email.js';
+import { sendOtpEmail, getEmailDebugConfig } from '../utils/email.js';
+import { env } from '../config/env.js';
 import {
   generateAccessToken,
   generateRefreshToken,
@@ -14,7 +15,6 @@ import {
   Forbidden,
   Conflict,
 } from '../utils/AppError.js';
-import { env } from '../config/env.js';
 import { logger } from '../utils/logger.js';
 import { safeRedis } from '../utils/redis.js';
 
@@ -27,7 +27,96 @@ const generateOtp = () => crypto.randomInt(100000, 1000000).toString();
 const hashOtp = (otp) =>
   crypto.createHash('sha256').update(String(otp)).digest('hex');
 
-const normalizeEmail = (email) => String(email || '').trim().toLowerCase();
+const memoryCache = new Map();
+
+const setMemory = (key, seconds, value) => {
+  memoryCache.set(key, {
+    value: String(value),
+    expiresAt: Date.now() + Number(seconds) * 1000,
+  });
+};
+
+const getMemory = (key) => {
+  const item = memoryCache.get(key);
+  if (!item) return null;
+
+  if (Date.now() > item.expiresAt) {
+    memoryCache.delete(key);
+    return null;
+  }
+
+  return item.value;
+};
+
+const delMemory = (key) => {
+  memoryCache.delete(key);
+};
+
+const cache = {
+  async setex(key, seconds, value) {
+    const redisResult = await safeRedis.setex(key, seconds, value);
+    if (redisResult === null || redisResult === undefined) {
+      setMemory(key, seconds, value);
+    }
+    return true;
+  },
+
+  async get(key) {
+    const redisValue = await safeRedis.get(key);
+    return redisValue ?? getMemory(key);
+  },
+
+  async del(key) {
+    await safeRedis.del(key);
+    delMemory(key);
+    return true;
+  },
+};
+
+const buildOtpResponse = (baseMessage, deliveryResult) => ({
+  message: baseMessage,
+  ...(deliveryResult?.devOtp
+    ? {
+        devOtp: deliveryResult.devOtp,
+        emailDelivery: 'failed_dev_fallback',
+        emailError: deliveryResult.emailError,
+        emailConfig: deliveryResult.emailConfig,
+      }
+    : { emailDelivery: 'sent' }),
+});
+
+const deliverOtpOrFallback = async ({ email, otp, type }) => {
+  try {
+    await sendOtpEmail(email, otp, type);
+    return { delivered: true };
+  } catch (error) {
+    const emailConfig = getEmailDebugConfig();
+
+    if (env.EMAIL_FAIL_OPEN) {
+      logger.warn({
+        event: 'otp_email_fail_open',
+        email,
+        type,
+        otp: env.EMAIL_LOG_OTP ? otp : undefined,
+        error: error.message,
+        emailConfig,
+      });
+
+      return {
+        delivered: false,
+        devOtp: env.EMAIL_LOG_OTP ? otp : undefined,
+        emailError: error.message,
+        emailConfig,
+      };
+    }
+
+    throw new AppError(
+      'OTP email sending failed. Set EMAIL_PORT=587 and EMAIL_SECURE=false on Render, use Gmail App Password, then redeploy.',
+      502
+    );
+  }
+};
+
 
 const toClientLocation = (location) => {
   if (!location) return null;
@@ -54,48 +143,13 @@ const toClientLocation = (location) => {
   return null;
 };
 
-const verifyOtpKey = (email) => `otp:verify:${normalizeEmail(email)}`;
-const resetOtpKey = (email) => `otp:reset:${normalizeEmail(email)}`;
-const verifyAttemptKey = (email) => `otp_attempts:${normalizeEmail(email)}`;
-const resetAttemptKey = (email) => `reset_attempts:${normalizeEmail(email)}`;
-
-const storeOtp = async ({ email, otp, purpose }) => {
-  const otpHash = hashOtp(otp);
-  const key = purpose === 'reset' ? resetOtpKey(email) : verifyOtpKey(email);
-  const attemptKey = purpose === 'reset' ? resetAttemptKey(email) : verifyAttemptKey(email);
-
-  await safeRedis.setex(key, OTP_EXPIRY_SECONDS, otpHash);
-  await safeRedis.del(attemptKey);
-};
-
-const sendOtpOrThrow = async ({ email, otp, type }) => {
-  try {
-    await sendOtpEmail(email, otp, type);
-
-    if (env.DEV_SHOW_OTP && env.NODE_ENV !== 'production') {
-      logger.warn({ event: 'dev_otp', email, type, otp });
-    }
-  } catch (error) {
-    if (env.DEV_SHOW_OTP && env.NODE_ENV !== 'production') {
-      logger.warn({
-        event: 'dev_otp_email_failed_but_otp_is_valid',
-        email,
-        type,
-        otp,
-      });
-    }
-
-    throw new AppError(
-      'OTP email sending failed. Check EMAIL_PORT=587 with EMAIL_SECURE=false, Gmail App Password, and internet/SMTP access.',
-      502
-    );
-  }
-};
+const verifyOtpKey = (email) => `otp:verify:${email}`;
+const resetOtpKey = (email) => `otp:reset:${email}`;
+const verifyAttemptKey = (email) => `otp_attempts:${email}`;
+const resetAttemptKey = (email) => `reset_attempts:${email}`;
 
 export const authService = {
   async register({ name, email, password }) {
-    email = normalizeEmail(email);
-
     let user = await userRepository.findPublicByEmail(email);
 
     if (user?.isVerified) {
@@ -115,18 +169,21 @@ export const authService = {
     }
 
     const otp = generateOtp();
+    const otpHash = hashOtp(otp);
 
-    await storeOtp({ email, otp, purpose: 'verify' });
-    await sendOtpOrThrow({ email, otp, type: 'verify' });
+    await cache.setex(verifyOtpKey(email), OTP_EXPIRY_SECONDS, otpHash);
+    await cache.del(verifyAttemptKey(email));
 
-    logger.info({ event: 'otp_sent_register', email });
+    const deliveryResult = await deliverOtpOrFallback({
+      email,
+      otp,
+      type: 'verify',
+    });
 
-    return { message: 'Verification OTP sent' };
+    return buildOtpResponse('Verification OTP sent', deliveryResult);
   },
 
   async verifyEmailOtp({ email, otp }) {
-    email = normalizeEmail(email);
-
     const user = await userRepository.findPublicByEmail(email);
 
     if (!user) {
@@ -137,13 +194,13 @@ export const authService = {
       return { message: 'Email already verified' };
     }
 
-    const attempts = Number((await safeRedis.get(verifyAttemptKey(email))) || 0);
+    const attempts = Number((await cache.get(verifyAttemptKey(email))) || 0);
 
     if (attempts >= OTP_LIMIT) {
       throw Forbidden('Too many attempts. Try later');
     }
 
-    const storedOtpHash = await safeRedis.get(verifyOtpKey(email));
+    const storedOtpHash = await cache.get(verifyOtpKey(email));
 
     if (!storedOtpHash) {
       throw BadRequest('OTP expired. Please request a new OTP');
@@ -152,12 +209,12 @@ export const authService = {
     const incomingHash = hashOtp(otp);
 
     if (storedOtpHash !== incomingHash) {
-      await safeRedis.setex(verifyAttemptKey(email), LOCK_TIME, attempts + 1);
+      await cache.setex(verifyAttemptKey(email), LOCK_TIME, attempts + 1);
       throw BadRequest('Invalid OTP');
     }
 
-    await safeRedis.del(verifyOtpKey(email));
-    await safeRedis.del(verifyAttemptKey(email));
+    await cache.del(verifyOtpKey(email));
+    await cache.del(verifyAttemptKey(email));
 
     user.isVerified = true;
     await userRepository.save(user);
@@ -166,8 +223,6 @@ export const authService = {
   },
 
   async resendVerificationOtp(email) {
-    email = normalizeEmail(email);
-
     const user = await userRepository.findPublicByEmail(email);
 
     if (!user || user.isVerified) {
@@ -178,21 +233,26 @@ export const authService = {
     }
 
     const otp = generateOtp();
+    const otpHash = hashOtp(otp);
 
-    await storeOtp({ email, otp, purpose: 'verify' });
-    await sendOtpOrThrow({ email, otp, type: 'verify' });
+    await cache.setex(verifyOtpKey(email), OTP_EXPIRY_SECONDS, otpHash);
+    await cache.del(verifyAttemptKey(email));
+
+    const deliveryResult = await deliverOtpOrFallback({
+      email,
+      otp,
+      type: 'verify',
+    });
 
     logger.info({ event: 'otp_resent', email });
 
-    return {
-      message:
-        'If that email is pending verification, a new OTP has been sent',
-    };
+    return buildOtpResponse(
+      'If that email is pending verification, a new OTP has been sent',
+      deliveryResult
+    );
   },
 
   async login({ email, password, currentLocation }) {
-    email = normalizeEmail(email);
-
     const user = await userRepository.findAuthByEmail(email);
 
     if (!user) {
@@ -200,7 +260,7 @@ export const authService = {
     }
 
     const lockKey = `login_lock:${email}`;
-    const locked = await safeRedis.get(lockKey);
+    const locked = await cache.get(lockKey);
 
     if (locked) {
       throw Forbidden('Account temporarily locked');
@@ -210,19 +270,19 @@ export const authService = {
 
     if (!isMatch) {
       const failKey = `login_fail:${email}`;
-      const fails = Number((await safeRedis.get(failKey)) || 0) + 1;
+      const fails = Number((await cache.get(failKey)) || 0) + 1;
 
       if (fails >= 5) {
-        await safeRedis.setex(lockKey, LOCK_TIME, 1);
-        await safeRedis.del(failKey);
+        await cache.setex(lockKey, LOCK_TIME, 1);
+        await cache.del(failKey);
       } else {
-        await safeRedis.setex(failKey, LOCK_TIME, fails);
+        await cache.setex(failKey, LOCK_TIME, fails);
       }
 
       throw Unauthorized('Invalid credentials');
     }
 
-    await safeRedis.del(`login_fail:${email}`);
+    await cache.del(`login_fail:${email}`);
 
     if (!user.isVerified) {
       throw Forbidden('Verify email first');
@@ -275,7 +335,7 @@ export const authService = {
       throw Unauthorized('Invalid refresh token');
     }
 
-    const blacklisted = await safeRedis.get(`rbl:${decoded.jti}`);
+    const blacklisted = await cache.get(`rbl:${decoded.jti}`);
 
     if (blacklisted) {
       throw Unauthorized('Refresh token revoked');
@@ -288,7 +348,7 @@ export const authService = {
 
   async logout(userId, jti) {
     if (jti) {
-      await safeRedis.setex(`bl:${jti}`, 60 * 60, 1);
+      await cache.setex(`bl:${jti}`, 60 * 60, 1);
     }
 
     logger.info({ event: 'logout', userId });
@@ -297,8 +357,6 @@ export const authService = {
   },
 
   async forgotPassword(email) {
-    email = normalizeEmail(email);
-
     const user = await userRepository.findPublicByEmail(email);
 
     if (!user || !user.isVerified) {
@@ -309,34 +367,39 @@ export const authService = {
     }
 
     const otp = generateOtp();
+    const otpHash = hashOtp(otp);
 
-    await storeOtp({ email, otp, purpose: 'reset' });
-    await sendOtpOrThrow({ email, otp, type: 'reset' });
+    await cache.setex(resetOtpKey(email), OTP_EXPIRY_SECONDS, otpHash);
+    await cache.del(resetAttemptKey(email));
+
+    const deliveryResult = await deliverOtpOrFallback({
+      email,
+      otp,
+      type: 'reset',
+    });
 
     logger.info({ event: 'forgot_password', email });
 
-    return {
-      message:
-        'If that email is registered, a password-reset OTP has been sent',
-    };
+    return buildOtpResponse(
+      'If that email is registered, a password-reset OTP has been sent',
+      deliveryResult
+    );
   },
 
   async resetPassword({ email, otp, password }) {
-    email = normalizeEmail(email);
-
     const user = await userRepository.findPublicByEmail(email);
 
     if (!user) {
       throw BadRequest('Invalid request');
     }
 
-    const attempts = Number((await safeRedis.get(resetAttemptKey(email))) || 0);
+    const attempts = Number((await cache.get(resetAttemptKey(email))) || 0);
 
     if (attempts >= OTP_LIMIT) {
       throw Forbidden('Too many attempts. Try later');
     }
 
-    const storedOtpHash = await safeRedis.get(resetOtpKey(email));
+    const storedOtpHash = await cache.get(resetOtpKey(email));
 
     if (!storedOtpHash) {
       throw BadRequest('OTP expired. Please request a new OTP');
@@ -345,12 +408,12 @@ export const authService = {
     const incomingHash = hashOtp(otp);
 
     if (storedOtpHash !== incomingHash) {
-      await safeRedis.setex(resetAttemptKey(email), LOCK_TIME, attempts + 1);
+      await cache.setex(resetAttemptKey(email), LOCK_TIME, attempts + 1);
       throw BadRequest('Invalid OTP');
     }
 
-    await safeRedis.del(resetOtpKey(email));
-    await safeRedis.del(resetAttemptKey(email));
+    await cache.del(resetOtpKey(email));
+    await cache.del(resetAttemptKey(email));
 
     user.password = password;
     await userRepository.save(user);

@@ -2,52 +2,37 @@ import nodemailer from 'nodemailer';
 import { env } from '../config/env.js';
 import { logger } from './logger.js';
 
-const emailPass = String(env.EMAIL_PASS || '').replace(/\s/g, '');
+const normalizeAppPassword = (value = '') => String(value).replace(/\s/g, '');
+
 const emailPort = Number(env.EMAIL_PORT || 587);
-const hasExplicitSecure = process.env.EMAIL_SECURE !== undefined;
+const emailSecure = Boolean(env.EMAIL_SECURE);
 
-// Gmail rule:
-// 465  => secure true
-// 587  => secure false, then STARTTLS
-const emailSecure = hasExplicitSecure
-  ? String(env.EMAIL_SECURE).toLowerCase() === 'true'
-  : emailPort === 465;
+const createTransporter = () =>
+  nodemailer.createTransport({
+    host: env.EMAIL_HOST || 'smtp.gmail.com',
+    port: emailPort,
+    secure: emailSecure, // true only for 465, false for 587 STARTTLS
+    family: 4,
+    requireTLS: emailPort === 587,
+    auth: {
+      user: env.EMAIL_USER,
+      pass: normalizeAppPassword(env.EMAIL_PASS),
+    },
+    connectionTimeout: 20000,
+    greetingTimeout: 20000,
+    socketTimeout: 30000,
+    tls: {
+      servername: env.EMAIL_HOST || 'smtp.gmail.com',
+      minVersion: 'TLSv1.2',
+    },
+  });
 
-const smtpHost = env.EMAIL_HOST || 'smtp.gmail.com';
-
-const fromAddress = (() => {
-  const configured = String(env.EMAIL_FROM || '').trim();
-
-  // If EMAIL_FROM is a full display address like "SahaYatri <x@gmail.com>", use it.
-  if (configured.includes('<') && configured.includes('>')) return configured;
-
-  // For Gmail, the safest sender is the authenticated mailbox.
-  return `"SahaYatri" <${env.EMAIL_USER}>`;
-})();
-
-const transporter = nodemailer.createTransport({
-  host: smtpHost,
-  port: emailPort,
-  secure: emailSecure,
-  family: 4,
-  requireTLS: !emailSecure,
-  auth: {
-    user: env.EMAIL_USER,
-    pass: emailPass,
-  },
-  connectionTimeout: 20000,
-  greetingTimeout: 20000,
-  socketTimeout: 30000,
-  tls: {
-    servername: smtpHost,
-    minVersion: 'TLSv1.2',
-  },
-});
+const transporter = createTransporter();
 
 const getOtpSubject = (type) =>
   type === 'reset' ? 'Password reset OTP' : 'Email verification OTP';
 
-const getOtpHtml = (otp, type) => {
+const getOtpHtml = (otp, type = 'verify') => {
   const title = type === 'reset' ? 'Reset your password' : 'Verify your email';
 
   return `
@@ -64,12 +49,19 @@ const getOtpHtml = (otp, type) => {
   `;
 };
 
+export const getEmailDebugConfig = () => ({
+  host: env.EMAIL_HOST,
+  port: emailPort,
+  secure: emailSecure,
+  user: env.EMAIL_USER,
+});
+
 export const sendOtpEmail = async (to, otp, type = 'verify') => {
   const subject = getOtpSubject(type);
 
   try {
     const info = await transporter.sendMail({
-      from: fromAddress,
+      from: env.EMAIL_FROM || `SahaYatri <${env.EMAIL_USER}>`,
       to,
       subject,
       html: getOtpHtml(otp, type),
@@ -80,7 +72,7 @@ export const sendOtpEmail = async (to, otp, type = 'verify') => {
       to,
       subject,
       messageId: info.messageId,
-      host: smtpHost,
+      host: env.EMAIL_HOST,
       port: emailPort,
       secure: emailSecure,
     });
@@ -96,7 +88,7 @@ export const sendOtpEmail = async (to, otp, type = 'verify') => {
       command: error.command,
       response: error.response,
       responseCode: error.responseCode,
-      host: smtpHost,
+      host: env.EMAIL_HOST,
       port: emailPort,
       secure: emailSecure,
       user: env.EMAIL_USER,
