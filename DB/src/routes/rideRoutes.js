@@ -28,7 +28,7 @@ router.post(
 );
 router.get('/user/me', protect, rideController.getUserRides);
 
-router.get('/nearby', protect, rideController.getNearbyRides);
+router.get('/nearby', rideController.getNearbyRides);
 router.get('/track/:token', rideController.getPublicTracking);
 router.get('/match', protect, rideController.getMatchedRides);
 

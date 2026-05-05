@@ -8,7 +8,7 @@ const Register = () => {
   const navigate = useNavigate();
 
   const backendBase = (
-    import.meta.env.VITE_BACKEND_URL || 'https://sahayatri-p95g.onrender.com'
+    import.meta.env.VITE_BACKEND_URL || 'http://localhost:5000'
   ).replace(/\/$/, '');
 
   const oauthGoogleUrl = `${backendBase}/api/auth/google`;

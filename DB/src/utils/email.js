@@ -3,22 +3,44 @@ import { env } from '../config/env.js';
 import { logger } from './logger.js';
 
 const emailPass = String(env.EMAIL_PASS || '').replace(/\s/g, '');
-const emailSecure = String(env.EMAIL_SECURE).toLowerCase() === 'true';
+const emailPort = Number(env.EMAIL_PORT || 587);
+const hasExplicitSecure = process.env.EMAIL_SECURE !== undefined;
+
+// Gmail rule:
+// 465  => secure true
+// 587  => secure false, then STARTTLS
+const emailSecure = hasExplicitSecure
+  ? String(env.EMAIL_SECURE).toLowerCase() === 'true'
+  : emailPort === 465;
+
+const smtpHost = env.EMAIL_HOST || 'smtp.gmail.com';
+
+const fromAddress = (() => {
+  const configured = String(env.EMAIL_FROM || '').trim();
+
+  // If EMAIL_FROM is a full display address like "SahaYatri <x@gmail.com>", use it.
+  if (configured.includes('<') && configured.includes('>')) return configured;
+
+  // For Gmail, the safest sender is the authenticated mailbox.
+  return `"SahaYatri" <${env.EMAIL_USER}>`;
+})();
 
 const transporter = nodemailer.createTransport({
-  host: env.EMAIL_HOST || 'smtp.gmail.com',
-  port: Number(env.EMAIL_PORT || 465),
+  host: smtpHost,
+  port: emailPort,
   secure: emailSecure,
   family: 4,
+  requireTLS: !emailSecure,
   auth: {
     user: env.EMAIL_USER,
     pass: emailPass,
   },
-  connectionTimeout: 30000,
-  greetingTimeout: 30000,
+  connectionTimeout: 20000,
+  greetingTimeout: 20000,
   socketTimeout: 30000,
   tls: {
-    servername: env.EMAIL_HOST || 'smtp.gmail.com',
+    servername: smtpHost,
+    minVersion: 'TLSv1.2',
   },
 });
 
@@ -47,7 +69,7 @@ export const sendOtpEmail = async (to, otp, type = 'verify') => {
 
   try {
     const info = await transporter.sendMail({
-      from: `"SahaYatri" <${env.EMAIL_USER}>`,
+      from: fromAddress,
       to,
       subject,
       html: getOtpHtml(otp, type),
@@ -58,8 +80,8 @@ export const sendOtpEmail = async (to, otp, type = 'verify') => {
       to,
       subject,
       messageId: info.messageId,
-      host: env.EMAIL_HOST,
-      port: Number(env.EMAIL_PORT || 465),
+      host: smtpHost,
+      port: emailPort,
       secure: emailSecure,
     });
 
@@ -74,8 +96,8 @@ export const sendOtpEmail = async (to, otp, type = 'verify') => {
       command: error.command,
       response: error.response,
       responseCode: error.responseCode,
-      host: env.EMAIL_HOST,
-      port: Number(env.EMAIL_PORT || 465),
+      host: smtpHost,
+      port: emailPort,
       secure: emailSecure,
       user: env.EMAIL_USER,
     });

@@ -8,11 +8,13 @@ import {
   verifyRefreshToken,
 } from '../utils/token.js';
 import {
+  AppError,
   BadRequest,
   Unauthorized,
   Forbidden,
   Conflict,
 } from '../utils/AppError.js';
+import { env } from '../config/env.js';
 import { logger } from '../utils/logger.js';
 import { safeRedis } from '../utils/redis.js';
 
@@ -24,6 +26,8 @@ const generateOtp = () => crypto.randomInt(100000, 1000000).toString();
 
 const hashOtp = (otp) =>
   crypto.createHash('sha256').update(String(otp)).digest('hex');
+
+const normalizeEmail = (email) => String(email || '').trim().toLowerCase();
 
 const toClientLocation = (location) => {
   if (!location) return null;
@@ -50,13 +54,48 @@ const toClientLocation = (location) => {
   return null;
 };
 
-const verifyOtpKey = (email) => `otp:verify:${email}`;
-const resetOtpKey = (email) => `otp:reset:${email}`;
-const verifyAttemptKey = (email) => `otp_attempts:${email}`;
-const resetAttemptKey = (email) => `reset_attempts:${email}`;
+const verifyOtpKey = (email) => `otp:verify:${normalizeEmail(email)}`;
+const resetOtpKey = (email) => `otp:reset:${normalizeEmail(email)}`;
+const verifyAttemptKey = (email) => `otp_attempts:${normalizeEmail(email)}`;
+const resetAttemptKey = (email) => `reset_attempts:${normalizeEmail(email)}`;
+
+const storeOtp = async ({ email, otp, purpose }) => {
+  const otpHash = hashOtp(otp);
+  const key = purpose === 'reset' ? resetOtpKey(email) : verifyOtpKey(email);
+  const attemptKey = purpose === 'reset' ? resetAttemptKey(email) : verifyAttemptKey(email);
+
+  await safeRedis.setex(key, OTP_EXPIRY_SECONDS, otpHash);
+  await safeRedis.del(attemptKey);
+};
+
+const sendOtpOrThrow = async ({ email, otp, type }) => {
+  try {
+    await sendOtpEmail(email, otp, type);
+
+    if (env.DEV_SHOW_OTP && env.NODE_ENV !== 'production') {
+      logger.warn({ event: 'dev_otp', email, type, otp });
+    }
+  } catch (error) {
+    if (env.DEV_SHOW_OTP && env.NODE_ENV !== 'production') {
+      logger.warn({
+        event: 'dev_otp_email_failed_but_otp_is_valid',
+        email,
+        type,
+        otp,
+      });
+    }
+
+    throw new AppError(
+      'OTP email sending failed. Check EMAIL_PORT=587 with EMAIL_SECURE=false, Gmail App Password, and internet/SMTP access.',
+      502
+    );
+  }
+};
 
 export const authService = {
   async register({ name, email, password }) {
+    email = normalizeEmail(email);
+
     let user = await userRepository.findPublicByEmail(email);
 
     if (user?.isVerified) {
@@ -76,17 +115,18 @@ export const authService = {
     }
 
     const otp = generateOtp();
-    const otpHash = hashOtp(otp);
 
-    await safeRedis.setex(verifyOtpKey(email), OTP_EXPIRY_SECONDS, otpHash);
-    await safeRedis.del(verifyAttemptKey(email));
+    await storeOtp({ email, otp, purpose: 'verify' });
+    await sendOtpOrThrow({ email, otp, type: 'verify' });
 
-    await sendOtpEmail(email, otp, 'verify');
+    logger.info({ event: 'otp_sent_register', email });
 
     return { message: 'Verification OTP sent' };
   },
 
   async verifyEmailOtp({ email, otp }) {
+    email = normalizeEmail(email);
+
     const user = await userRepository.findPublicByEmail(email);
 
     if (!user) {
@@ -126,6 +166,8 @@ export const authService = {
   },
 
   async resendVerificationOtp(email) {
+    email = normalizeEmail(email);
+
     const user = await userRepository.findPublicByEmail(email);
 
     if (!user || user.isVerified) {
@@ -136,12 +178,9 @@ export const authService = {
     }
 
     const otp = generateOtp();
-    const otpHash = hashOtp(otp);
 
-    await safeRedis.setex(verifyOtpKey(email), OTP_EXPIRY_SECONDS, otpHash);
-    await safeRedis.del(verifyAttemptKey(email));
-
-    await sendOtpEmail(email, otp, 'verify');
+    await storeOtp({ email, otp, purpose: 'verify' });
+    await sendOtpOrThrow({ email, otp, type: 'verify' });
 
     logger.info({ event: 'otp_resent', email });
 
@@ -152,6 +191,8 @@ export const authService = {
   },
 
   async login({ email, password, currentLocation }) {
+    email = normalizeEmail(email);
+
     const user = await userRepository.findAuthByEmail(email);
 
     if (!user) {
@@ -256,6 +297,8 @@ export const authService = {
   },
 
   async forgotPassword(email) {
+    email = normalizeEmail(email);
+
     const user = await userRepository.findPublicByEmail(email);
 
     if (!user || !user.isVerified) {
@@ -266,12 +309,9 @@ export const authService = {
     }
 
     const otp = generateOtp();
-    const otpHash = hashOtp(otp);
 
-    await safeRedis.setex(resetOtpKey(email), OTP_EXPIRY_SECONDS, otpHash);
-    await safeRedis.del(resetAttemptKey(email));
-
-    await sendOtpEmail(email, otp, 'reset');
+    await storeOtp({ email, otp, purpose: 'reset' });
+    await sendOtpOrThrow({ email, otp, type: 'reset' });
 
     logger.info({ event: 'forgot_password', email });
 
@@ -282,6 +322,8 @@ export const authService = {
   },
 
   async resetPassword({ email, otp, password }) {
+    email = normalizeEmail(email);
+
     const user = await userRepository.findPublicByEmail(email);
 
     if (!user) {
