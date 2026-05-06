@@ -239,6 +239,8 @@ const FindRide = () => {
   const [lastSearchParams, setLastSearchParams] = useState(null);
   const [recentSearches, setRecentSearches] = useState([]);
   const [closeSuggestionsSignal, setCloseSuggestionsSignal] = useState(0);
+  const [fromCloseSignal, setFromCloseSignal] = useState(0);
+  const [toCloseSignal, setToCloseSignal] = useState(0);
 
   const fromText = getSearchText(from);
   const toText = getSearchText(to);
@@ -439,6 +441,8 @@ const FindRide = () => {
     if (loading) return;
 
     setCloseSuggestionsSignal((prev) => prev + 1);
+    setFromCloseSignal((prev) => prev + 1);
+    setToCloseSignal((prev) => prev + 1);
 
     try {
       const params = buildParamsFromState();
@@ -678,7 +682,8 @@ const FindRide = () => {
             onChange={setFrom}
             placeholder="Source location"
             disabled={loading}
-            closeSignal={closeSuggestionsSignal}
+            closeSignal={closeSuggestionsSignal + fromCloseSignal}
+            onOpen={() => setToCloseSignal((prev) => prev + 1)}
           />
 
           <LocationSearch
@@ -687,7 +692,8 @@ const FindRide = () => {
             onChange={setTo}
             placeholder="Destination location"
             disabled={loading}
-            closeSignal={closeSuggestionsSignal}
+            closeSignal={closeSuggestionsSignal + toCloseSignal}
+            onOpen={() => setFromCloseSignal((prev) => prev + 1)}
           />
 
           <div>

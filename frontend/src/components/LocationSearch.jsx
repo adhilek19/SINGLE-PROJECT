@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { MapPin, Loader2 } from 'lucide-react';
+import { fetchGeoapifyLocations } from '../services/locationAutocomplete';
 
 const LocationSearch = ({
   label,
@@ -11,6 +12,7 @@ const LocationSearch = ({
   onChange,
   disabled = false,
   closeSignal = 0,
+  onOpen,
 }) => {
   const initialValue =
     (typeof value === 'string' ? value : value?.name || value?.label || '') ||
@@ -20,6 +22,7 @@ const LocationSearch = ({
   const [results, setResults] = useState([]);
   const [isOpen, setIsOpen] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [noResults, setNoResults] = useState(false);
   const wrapperRef = useRef(null);
 
   useEffect(() => {
@@ -32,6 +35,7 @@ const LocationSearch = ({
 
   useEffect(() => {
     setIsOpen(false);
+    setNoResults(false);
   }, [closeSignal]);
 
   useEffect(() => {
@@ -51,33 +55,25 @@ const LocationSearch = ({
     const searchLocation = async () => {
       const trimmedQuery = query.trim();
 
-      if (trimmedQuery.length < 2) {
+      if (trimmedQuery.length < 3) {
         setResults([]);
         setIsOpen(false);
+        setNoResults(false);
         return;
       }
 
       setLoading(true);
 
       try {
-        const res = await fetch(
-          `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(
-            trimmedQuery
-          )}&format=json&addressdetails=1&limit=5&countrycodes=in`,
-          {
-            headers: {
-              'Accept-Language': 'en',
-            },
-            signal: controller.signal,
-          }
-        );
-
-        const data = await res.json();
-        setResults(Array.isArray(data) ? data : []);
-        setIsOpen(true);
+        const data = await fetchGeoapifyLocations(trimmedQuery, controller.signal);
+        setResults(data);
+        setNoResults(trimmedQuery.length >= 3 && data.length === 0);
+        setIsOpen(trimmedQuery.length >= 3);
       } catch (error) {
         if (error.name !== 'AbortError') {
-          console.error('Location search error:', error);
+          setResults([]);
+          setNoResults(false);
+          setIsOpen(false);
         }
       } finally {
         setLoading(false);
@@ -93,19 +89,14 @@ const LocationSearch = ({
   }, [query, defaultValue]);
 
   const handleSelect = (place) => {
-    const lng = Number(place.lon);
     const selectedPlace = {
-      name: place.display_name,
-      lat: Number(place.lat),
-      lng,
-      // Backward-compatible keys for older callers.
-      display_name: place.display_name,
-      lon: lng,
-      raw: place,
+      ...place,
+      name: place.name || place.label,
     };
 
     setQuery(selectedPlace.name);
     setResults([]);
+    setNoResults(false);
     setIsOpen(false);
     onChange?.(selectedPlace);
     onSelect?.(selectedPlace);
@@ -126,8 +117,15 @@ const LocationSearch = ({
           type="text"
           value={query}
           disabled={disabled}
-          onChange={(e) => setQuery(e.target.value)}
-          onFocus={() => query.trim().length >= 2 && results.length > 0 && setIsOpen(true)}
+          onChange={(e) => {
+            const valueText = e.target.value;
+            setQuery(valueText);
+            onChange?.(valueText ? { label: valueText, name: valueText } : null);
+          }}
+          onFocus={() => {
+            onOpen?.();
+            if (query.trim().length >= 3) setIsOpen(true);
+          }}
           onKeyDown={(e) => {
             if (e.key === 'Enter') setIsOpen(false);
           }}
@@ -140,19 +138,22 @@ const LocationSearch = ({
         )}
       </div>
 
-      {isOpen && results.length > 0 && (
+      {isOpen && (
         <div className="absolute top-full left-0 right-0 mt-2 max-h-60 overflow-y-auto bg-white rounded-xl shadow-xl border border-slate-100 z-50 md:max-h-72">
           {results.map((place) => (
             <button
               type="button"
-              key={place.place_id}
+              key={`${place.lat}-${place.lng}-${place.label}`}
               onClick={() => handleSelect(place)}
               className="w-full text-left px-4 py-3 hover:bg-slate-50 cursor-pointer text-slate-700 text-sm border-b last:border-0 border-slate-50"
-              title={place.display_name}
+              title={place.label}
             >
-              {place.display_name}
+              {place.label}
             </button>
           ))}
+          {!loading && noResults ? (
+            <div className="px-4 py-3 text-sm text-slate-500">No locations found</div>
+          ) : null}
         </div>
       )}
     </div>
