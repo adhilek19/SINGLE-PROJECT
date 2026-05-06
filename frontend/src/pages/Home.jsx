@@ -17,14 +17,28 @@ const Home = () => {
   const [from, setFrom] = useState(null);
   const [to, setTo] = useState(null);
   const [date, setDate] = useState('');
+  const [activeLocationDropdown, setActiveLocationDropdown] = useState(null);
+  const [closeSuggestionsSignal, setCloseSuggestionsSignal] = useState(0);
 
   const handleSearch = (e) => {
     e.preventDefault();
+    setActiveLocationDropdown(null);
+    setCloseSuggestionsSignal((prev) => prev + 1);
 
     const params = new URLSearchParams();
+    const fromName = from?.name || from?.label || '';
+    const toName = to?.name || to?.label || '';
 
-    if (from?.name) params.set('source', from.name);
-    if (to?.name) params.set('destination', to.name);
+    if (fromName) params.set('from', fromName);
+    if (toName) params.set('to', toName);
+    if (Number.isFinite(Number(from?.lat)) && Number.isFinite(Number(from?.lng))) {
+      params.set('fromLat', String(Number(from.lat)));
+      params.set('fromLng', String(Number(from.lng)));
+    }
+    if (Number.isFinite(Number(to?.lat)) && Number.isFinite(Number(to?.lng))) {
+      params.set('toLat', String(Number(to.lat)));
+      params.set('toLng', String(Number(to.lng)));
+    }
     if (date) params.set('date', date);
 
     dispatch({
@@ -36,7 +50,7 @@ const Home = () => {
       },
     });
 
-    navigate(`/find-ride?${params.toString()}`);
+    navigate(params.toString() ? `/find-ride?${params.toString()}` : '/find-ride');
   };
 
   return (
@@ -93,6 +107,10 @@ const Home = () => {
                   value={from}
                   onChange={setFrom}
                   placeholder="Enter starting location"
+                  closeSignal={closeSuggestionsSignal}
+                  isActive={activeLocationDropdown === 'from'}
+                  onActivate={() => setActiveLocationDropdown('from')}
+                  onCloseAll={() => setActiveLocationDropdown(null)}
                 />
 
                 <LocationSearch
@@ -100,6 +118,10 @@ const Home = () => {
                   value={to}
                   onChange={setTo}
                   placeholder="Enter destination"
+                  closeSignal={closeSuggestionsSignal}
+                  isActive={activeLocationDropdown === 'to'}
+                  onActivate={() => setActiveLocationDropdown('to')}
+                  onCloseAll={() => setActiveLocationDropdown(null)}
                 />
 
                 <div>

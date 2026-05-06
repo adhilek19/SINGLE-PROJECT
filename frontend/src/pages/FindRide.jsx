@@ -14,9 +14,10 @@ import toast from 'react-hot-toast';
 import { useSelector } from 'react-redux';
 import LocationSearch from '../components/LocationSearch';
 import { getErrorMessage, rideService } from '../services/api';
+import { resolveGeoapifyBestLocation } from '../services/locationAutocomplete';
 
 const SEARCH_HISTORY_KEY = 'rideSearchHistory';
-const SEARCH_STATE_KEY = 'rideSearchState';
+const SEARCH_STATE_KEY = 'sahayatri_find_ride_search_v3';
 const HISTORY_LIMIT = 3;
 const SEARCH_WINDOW_HOURS = 6;
 
@@ -77,6 +78,24 @@ const getSearchText = (place) => {
   return place.name || place.label || '';
 };
 
+const hasLocationCoords = (place) => {
+  if (!place || typeof place !== 'object') return false;
+  const lat = Number(place.lat);
+  const lng = Number(place.lng);
+  return Number.isFinite(lat) && Number.isFinite(lng);
+};
+
+const getLocationFromParams = (name, lat, lng) => {
+  const trimmedName = String(name || '').trim();
+  const parsedLat = Number(lat);
+  const parsedLng = Number(lng);
+  if (!trimmedName) return null;
+  if (Number.isFinite(parsedLat) && Number.isFinite(parsedLng)) {
+    return { name: trimmedName, label: trimmedName, lat: parsedLat, lng: parsedLng };
+  }
+  return { name: trimmedName };
+};
+
 const normalizeListResponse = (res) => {
   const data = res?.data?.data;
   if (Array.isArray(data?.rides)) return data.rides;
@@ -84,7 +103,7 @@ const normalizeListResponse = (res) => {
   return [];
 };
 
-const makeHistoryItem = ({ fromText, toText, dateTime, filters }) => {
+const makeHistoryItem = ({ fromText, toText, fromLocation, toLocation, dateTime, filters }) => {
   const dt = dateTime ? new Date(dateTime) : null;
   const date = dt && !Number.isNaN(dt.getTime()) ? dt.toISOString().slice(0, 10) : '';
   const time = dt && !Number.isNaN(dt.getTime()) ? dt.toTimeString().slice(0, 5) : '';
@@ -92,6 +111,10 @@ const makeHistoryItem = ({ fromText, toText, dateTime, filters }) => {
   return {
     source: fromText,
     destination: toText,
+    fromLat: hasLocationCoords(fromLocation) ? Number(fromLocation.lat) : null,
+    fromLng: hasLocationCoords(fromLocation) ? Number(fromLocation.lng) : null,
+    toLat: hasLocationCoords(toLocation) ? Number(toLocation.lat) : null,
+    toLng: hasLocationCoords(toLocation) ? Number(toLocation.lng) : null,
     date,
     time,
     dateTime: dateTime || '',
@@ -240,11 +263,18 @@ const FindRide = () => {
   const [recentSearches, setRecentSearches] = useState([]);
   const [closeSuggestionsSignal, setCloseSuggestionsSignal] = useState(0);
   const [activeLocationDropdown, setActiveLocationDropdown] = useState(null);
+  const [fromCorrectionHint, setFromCorrectionHint] = useState('');
+  const [toCorrectionHint, setToCorrectionHint] = useState('');
 
   const fromText = getSearchText(from);
   const toText = getSearchText(to);
 
   const noQueryTyped = !fromText && !toText;
+
+  const closeAllDropdowns = () => {
+    setActiveLocationDropdown(null);
+    setCloseSuggestionsSignal((prev) => prev + 1);
+  };
 
   const meaningfulSearchExists = useMemo(() => {
     return Boolean(
@@ -272,8 +302,12 @@ const FindRide = () => {
 
   const saveSearchState = () => {
     const payload = {
-      from,
-      to,
+      fromText,
+      toText,
+      fromLat: hasLocationCoords(from) ? Number(from.lat) : null,
+      fromLng: hasLocationCoords(from) ? Number(from.lng) : null,
+      toLat: hasLocationCoords(to) ? Number(to.lat) : null,
+      toLng: hasLocationCoords(to) ? Number(to.lng) : null,
       dateTime,
       vehicleType,
       minPrice,
@@ -292,6 +326,8 @@ const FindRide = () => {
     const historyItem = makeHistoryItem({
       fromText,
       toText,
+      fromLocation: from,
+      toLocation: to,
       dateTime,
       filters: {
         vehicleType,
@@ -314,6 +350,28 @@ const FindRide = () => {
     });
   };
 
+  useEffect(() => {
+    saveSearchState();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [
+    fromText,
+    toText,
+    from?.lat,
+    from?.lng,
+    to?.lat,
+    to?.lng,
+    dateTime,
+    vehicleType,
+    minPrice,
+    maxPrice,
+    seats,
+    radiusKm,
+    sort,
+    lat,
+    lng,
+    preferenceFilters,
+  ]);
+
   const buildTimeWindow = (rawDateTime) => {
     if (!rawDateTime) return {};
 
@@ -331,18 +389,69 @@ const FindRide = () => {
     };
   };
 
-  const buildParamsFromState = () => {
+  const resolveLocationForSearch = async (place) => {
+    const rawText = getSearchText(place).trim();
+    if (!rawText) return { location: null, correctedLabel: '' };
+    if (hasLocationCoords(place)) {
+      return { location: { ...place, name: rawText }, correctedLabel: '' };
+    }
+
+    try {
+      const resolved = await resolveGeoapifyBestLocation(rawText);
+      if (resolved) {
+        const normalized = {
+          ...resolved,
+          name: resolved.name || resolved.label || rawText,
+          label: resolved.label || resolved.name || rawText,
+        };
+        const correctedText = normalized.label || normalized.name || '';
+        const normalizedRaw = rawText.toLowerCase().trim();
+        const normalizedCorrected = correctedText.toLowerCase().trim();
+        const shouldHint = normalizedCorrected && normalizedCorrected !== normalizedRaw;
+        return {
+          location: normalized,
+          correctedLabel: shouldHint ? correctedText : '',
+        };
+      }
+    } catch {
+      // Manual text search fallback stays active when autocomplete/geocode fails.
+    }
+
+    return {
+      location: { name: rawText },
+      correctedLabel: '',
+    };
+  };
+
+  const buildParamsFromState = async () => {
+    const resolvedFrom = await resolveLocationForSearch(from);
+    const resolvedTo = await resolveLocationForSearch(to);
+
     const params = {
       page: 1,
       limit: 30,
       sort,
     };
 
-    if (fromText) params.from = fromText;
-    if (toText) params.to = toText;
+    const resolvedFromText = getSearchText(resolvedFrom.location);
+    const resolvedToText = getSearchText(resolvedTo.location);
+
+    if (resolvedFromText) params.from = resolvedFromText;
+    if (resolvedToText) params.to = resolvedToText;
+
+    if (hasLocationCoords(resolvedFrom.location)) {
+      params.fromLat = Number(resolvedFrom.location.lat);
+      params.fromLng = Number(resolvedFrom.location.lng);
+    }
+
+    if (hasLocationCoords(resolvedTo.location)) {
+      params.toLat = Number(resolvedTo.location.lat);
+      params.toLng = Number(resolvedTo.location.lng);
+    }
 
     const timeWindow = buildTimeWindow(dateTime);
     Object.assign(params, timeWindow);
+    if (dateTime) params.dateTime = dateTime;
 
     if (vehicleType) params.vehicleType = vehicleType;
 
@@ -366,7 +475,11 @@ const FindRide = () => {
       if (value !== false && value !== '') params[key] = value;
     });
 
-    return params;
+    return {
+      params,
+      resolvedFrom,
+      resolvedTo,
+    };
   };
 
   const applySearchParamsToUrl = (params) => {
@@ -439,11 +552,27 @@ const FindRide = () => {
     e.preventDefault();
     if (loading) return;
 
-    setCloseSuggestionsSignal((prev) => prev + 1);
-    setActiveLocationDropdown(null);
+    closeAllDropdowns();
+    setFromCorrectionHint('');
+    setToCorrectionHint('');
 
     try {
-      const params = buildParamsFromState();
+      const { params, resolvedFrom, resolvedTo } = await buildParamsFromState();
+
+      if (resolvedFrom.location) {
+        setFrom(resolvedFrom.location);
+        if (resolvedFrom.correctedLabel) {
+          setFromCorrectionHint(`Showing results for ${resolvedFrom.correctedLabel}`);
+        }
+      }
+
+      if (resolvedTo.location) {
+        setTo(resolvedTo.location);
+        if (resolvedTo.correctedLabel) {
+          setToCorrectionHint(`Showing results for ${resolvedTo.correctedLabel}`);
+        }
+      }
+
       applySearchParamsToUrl(params);
       await fetchRides(params);
     } catch (err) {
@@ -486,8 +615,8 @@ const FindRide = () => {
   };
 
   const applyHistoryItem = (item) => {
-    setFrom(item?.source ? { name: item.source } : null);
-    setTo(item?.destination ? { name: item.destination } : null);
+    setFrom(getLocationFromParams(item?.source, item?.fromLat, item?.fromLng));
+    setTo(getLocationFromParams(item?.destination, item?.toLat, item?.toLng));
     setDateTime(item?.dateTime || '');
 
     const filters = item?.filters || {};
@@ -506,8 +635,9 @@ const FindRide = () => {
       acAvailable: false,
       genderPreference: '',
     });
-    setActiveLocationDropdown(null);
-    setCloseSuggestionsSignal((prev) => prev + 1);
+    setFromCorrectionHint('');
+    setToCorrectionHint('');
+    closeAllDropdowns();
   };
 
   useEffect(() => {
@@ -521,10 +651,25 @@ const FindRide = () => {
       }
     }
 
+    const defaultFilters = {
+      womenOnly: false,
+      verifiedOnly: false,
+      smokingAllowed: false,
+      musicAllowed: false,
+      petsAllowed: false,
+      acAvailable: false,
+      genderPreference: '',
+    };
+
     const paramsFromUrl = {
       from: searchParams.get('from') || searchParams.get('source') || '',
       to: searchParams.get('to') || searchParams.get('destination') || '',
+      fromLat: searchParams.get('fromLat') || '',
+      fromLng: searchParams.get('fromLng') || '',
+      toLat: searchParams.get('toLat') || '',
+      toLng: searchParams.get('toLng') || '',
       dateTime: searchParams.get('dateTime') || '',
+      date: searchParams.get('date') || '',
       vehicleType: searchParams.get('vehicleType') || '',
       minPrice: searchParams.get('minPrice') || '',
       maxPrice: searchParams.get('maxPrice') || '',
@@ -544,17 +689,19 @@ const FindRide = () => {
       },
     };
 
-    const hasUrlState = Object.values(paramsFromUrl).some((v) => {
-      if (typeof v === 'object') {
-        return Object.values(v).some((inner) => inner !== '' && inner !== false);
-      }
-      return v !== '';
-    });
+    const hasUrlState =
+      Boolean(paramsFromUrl.from || paramsFromUrl.to || paramsFromUrl.dateTime || paramsFromUrl.date) ||
+      Boolean(paramsFromUrl.vehicleType || paramsFromUrl.minPrice || paramsFromUrl.maxPrice || paramsFromUrl.seats || paramsFromUrl.radiusKm) ||
+      Boolean(paramsFromUrl.lat || paramsFromUrl.lng || paramsFromUrl.fromLat || paramsFromUrl.fromLng || paramsFromUrl.toLat || paramsFromUrl.toLng) ||
+      Object.values(paramsFromUrl.preferenceFilters).some((v) => v !== '' && v !== false);
 
     if (hasUrlState) {
-      if (paramsFromUrl.from) setFrom({ name: paramsFromUrl.from });
-      if (paramsFromUrl.to) setTo({ name: paramsFromUrl.to });
-      setDateTime(paramsFromUrl.dateTime);
+      const restoredFrom = getLocationFromParams(paramsFromUrl.from, paramsFromUrl.fromLat, paramsFromUrl.fromLng);
+      const restoredTo = getLocationFromParams(paramsFromUrl.to, paramsFromUrl.toLat, paramsFromUrl.toLng);
+
+      setFrom(restoredFrom);
+      setTo(restoredTo);
+      setDateTime(paramsFromUrl.dateTime || '');
       setVehicleType(paramsFromUrl.vehicleType);
       setMinPrice(paramsFromUrl.minPrice);
       setMaxPrice(paramsFromUrl.maxPrice);
@@ -564,6 +711,9 @@ const FindRide = () => {
       setLat(paramsFromUrl.lat);
       setLng(paramsFromUrl.lng);
       setPreferenceFilters(paramsFromUrl.preferenceFilters);
+      setFromCorrectionHint('');
+      setToCorrectionHint('');
+      closeAllDropdowns();
 
       const initialParams = {
         page: Number(searchParams.get('page') || 1),
@@ -572,6 +722,14 @@ const FindRide = () => {
       };
       if (paramsFromUrl.from) initialParams.from = paramsFromUrl.from;
       if (paramsFromUrl.to) initialParams.to = paramsFromUrl.to;
+      if (paramsFromUrl.fromLat !== '' && paramsFromUrl.fromLng !== '') {
+        initialParams.fromLat = Number(paramsFromUrl.fromLat);
+        initialParams.fromLng = Number(paramsFromUrl.fromLng);
+      }
+      if (paramsFromUrl.toLat !== '' && paramsFromUrl.toLng !== '') {
+        initialParams.toLat = Number(paramsFromUrl.toLat);
+        initialParams.toLng = Number(paramsFromUrl.toLng);
+      }
       if (paramsFromUrl.dateTime) {
         const selected = new Date(paramsFromUrl.dateTime);
         if (!Number.isNaN(selected.getTime())) {
@@ -579,6 +737,8 @@ const FindRide = () => {
           initialParams.timeTo = new Date(selected.getTime() + SEARCH_WINDOW_HOURS * 60 * 60 * 1000).toISOString();
           initialParams.date = selected.toISOString().slice(0, 10);
         }
+      } else if (paramsFromUrl.date) {
+        initialParams.date = paramsFromUrl.date;
       }
       if (paramsFromUrl.vehicleType) initialParams.vehicleType = paramsFromUrl.vehicleType;
       if (paramsFromUrl.minPrice !== '') initialParams.minPrice = Number(paramsFromUrl.minPrice);
@@ -593,7 +753,14 @@ const FindRide = () => {
         if (value !== '' && value !== false) initialParams[key] = value;
       });
 
-      fetchRides(initialParams);
+      const shouldAutoSearchFromUrl =
+        Boolean(paramsFromUrl.from || paramsFromUrl.to || paramsFromUrl.date || paramsFromUrl.dateTime) ||
+        Boolean(paramsFromUrl.vehicleType || paramsFromUrl.minPrice || paramsFromUrl.maxPrice || paramsFromUrl.seats || paramsFromUrl.radiusKm) ||
+        Object.values(paramsFromUrl.preferenceFilters).some((v) => v !== '' && v !== false);
+
+      if (shouldAutoSearchFromUrl) {
+        fetchRides(initialParams);
+      }
       return;
     }
 
@@ -601,8 +768,11 @@ const FindRide = () => {
     if (savedState) {
       try {
         const parsed = JSON.parse(savedState);
-        if (parsed?.from) setFrom(parsed.from);
-        if (parsed?.to) setTo(parsed.to);
+        const restoredFrom = getLocationFromParams(parsed?.fromText, parsed?.fromLat, parsed?.fromLng);
+        const restoredTo = getLocationFromParams(parsed?.toText, parsed?.toLat, parsed?.toLng);
+
+        setFrom(restoredFrom);
+        setTo(restoredTo);
         setDateTime(parsed?.dateTime || '');
         setVehicleType(parsed?.vehicleType || '');
         setMinPrice(parsed?.minPrice || '');
@@ -612,15 +782,56 @@ const FindRide = () => {
         setSort(parsed?.sort || 'departure_time');
         setLat(parsed?.lat || '');
         setLng(parsed?.lng || '');
-        setPreferenceFilters(parsed?.preferenceFilters || {
-          womenOnly: false,
-          verifiedOnly: false,
-          smokingAllowed: false,
-          musicAllowed: false,
-          petsAllowed: false,
-          acAvailable: false,
-          genderPreference: '',
-        });
+        setPreferenceFilters(parsed?.preferenceFilters || defaultFilters);
+        setFromCorrectionHint('');
+        setToCorrectionHint('');
+        closeAllDropdowns();
+
+        const hasMeaningfulSavedState =
+          Boolean(restoredFrom || restoredTo || parsed?.dateTime) ||
+          Boolean(parsed?.vehicleType || parsed?.minPrice || parsed?.maxPrice || parsed?.seats || parsed?.radiusKm) ||
+          Object.values(parsed?.preferenceFilters || {}).some((v) => v !== '' && v !== false);
+
+        if (hasMeaningfulSavedState) {
+          const initialParams = {
+            page: 1,
+            limit: 30,
+            sort: parsed?.sort || 'departure_time',
+          };
+          if (parsed?.fromText) initialParams.from = parsed.fromText;
+          if (parsed?.toText) initialParams.to = parsed.toText;
+          if (parsed?.fromLat !== null && parsed?.fromLng !== null) {
+            initialParams.fromLat = Number(parsed.fromLat);
+            initialParams.fromLng = Number(parsed.fromLng);
+          }
+          if (parsed?.toLat !== null && parsed?.toLng !== null) {
+            initialParams.toLat = Number(parsed.toLat);
+            initialParams.toLng = Number(parsed.toLng);
+          }
+          if (parsed?.dateTime) {
+            const selected = new Date(parsed.dateTime);
+            if (!Number.isNaN(selected.getTime())) {
+              initialParams.timeFrom = selected.toISOString();
+              initialParams.timeTo = new Date(selected.getTime() + SEARCH_WINDOW_HOURS * 60 * 60 * 1000).toISOString();
+              initialParams.date = selected.toISOString().slice(0, 10);
+            }
+          }
+          if (parsed?.vehicleType) initialParams.vehicleType = parsed.vehicleType;
+          if (parsed?.minPrice !== '') initialParams.minPrice = Number(parsed.minPrice);
+          if (parsed?.maxPrice !== '') initialParams.maxPrice = Number(parsed.maxPrice);
+          if (parsed?.seats !== '') initialParams.seats = Number(parsed.seats);
+          if (parsed?.lat !== '' && parsed?.lng !== '') {
+            initialParams.lat = Number(parsed.lat);
+            initialParams.lng = Number(parsed.lng);
+          }
+          if (parsed?.radiusKm !== '') initialParams.radiusKm = Number(parsed.radiusKm);
+          Object.entries(parsed?.preferenceFilters || {}).forEach(([key, value]) => {
+            if (value !== '' && value !== false) initialParams[key] = value;
+          });
+
+          fetchRides(initialParams);
+          return;
+        }
       } catch {
         // ignore invalid state
       }
@@ -871,6 +1082,12 @@ const FindRide = () => {
             </button>
           </div>
         </form>
+
+        {fromCorrectionHint || toCorrectionHint ? (
+          <div className="mb-4 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm font-semibold text-emerald-700">
+            {[fromCorrectionHint, toCorrectionHint].filter(Boolean).join(' | ')}
+          </div>
+        ) : null}
 
         {recentSearches.length > 0 && noQueryTyped ? (
           <div className="mb-6 rounded-2xl border border-slate-200 bg-white p-4">

@@ -13,7 +13,7 @@ const LocationSearch = ({
   disabled = false,
   closeSignal = 0,
   onOpen,
-  isActive = false,
+  isActive,
   onActivate,
   onCloseAll,
 }) => {
@@ -30,6 +30,7 @@ const LocationSearch = ({
   const [lastSelectedValue, setLastSelectedValue] = useState('');
   const wrapperRef = useRef(null);
   const inputRef = useRef(null);
+  const fieldIsActive = typeof isActive === 'boolean' ? isActive : true;
 
   useEffect(() => {
     const nextValue =
@@ -40,6 +41,8 @@ const LocationSearch = ({
     if (value && typeof value === 'object' && (value.lat !== undefined || value.lng !== undefined)) {
       setHasSelectedLocation(true);
       setLastSelectedValue(nextValue.trim());
+    } else if (nextValue.trim()) {
+      setHasSelectedLocation(false);
     } else if (!nextValue.trim()) {
       setHasSelectedLocation(false);
       setLastSelectedValue('');
@@ -53,10 +56,11 @@ const LocationSearch = ({
   }, [closeSignal]);
 
   useEffect(() => {
-    if (!isActive) {
+    if (!fieldIsActive) {
       setIsOpen(false);
+      setSuggestions([]);
     }
-  }, [isActive]);
+  }, [fieldIsActive]);
 
   useEffect(() => {
     const closeDropdown = (event) => {
@@ -77,7 +81,12 @@ const LocationSearch = ({
     const searchLocation = async () => {
       const trimmedQuery = query.trim();
 
-      if (!isActive || disabled || hasSelectedLocation || trimmedQuery === lastSelectedValue || trimmedQuery.length < 3) {
+      if (
+        !fieldIsActive ||
+        disabled ||
+        trimmedQuery.length < 3 ||
+        (hasSelectedLocation && trimmedQuery === lastSelectedValue)
+      ) {
         setSuggestions([]);
         setIsOpen(false);
         setNoResults(false);
@@ -108,7 +117,7 @@ const LocationSearch = ({
       clearTimeout(timer);
       controller.abort();
     };
-  }, [query, defaultValue, isActive, disabled, hasSelectedLocation, lastSelectedValue]);
+  }, [query, defaultValue, fieldIsActive, disabled, hasSelectedLocation, lastSelectedValue]);
 
   const handleSelect = (place) => {
     const selectedPlace = {
@@ -147,24 +156,30 @@ const LocationSearch = ({
           disabled={disabled}
           onChange={(e) => {
             const valueText = e.target.value;
+            const trimmedValue = valueText.trim();
             const isManualEdit = valueText.trim() !== lastSelectedValue;
-            if (isManualEdit) {
+            if (isManualEdit && trimmedValue) {
               setHasSelectedLocation(false);
               setNoResults(false);
-              onChange?.(valueText || null);
+              onChange?.(valueText);
             }
             setQuery(valueText);
-            if (!valueText.trim()) {
+            if (!trimmedValue) {
               setSuggestions([]);
               setIsOpen(false);
+              setNoResults(false);
               setHasSelectedLocation(false);
               setLastSelectedValue('');
+              onChange?.('');
             }
           }}
           onFocus={() => {
             onActivate?.();
             onOpen?.();
-            if (!hasSelectedLocation && query.trim().length >= 3) setIsOpen(true);
+            if (hasSelectedLocation && query.trim() === lastSelectedValue) return;
+            if (!disabled && query.trim().length >= 3) {
+              setIsOpen(true);
+            }
           }}
           onKeyDown={(e) => {
             if (e.key === 'Enter') {
