@@ -1,8 +1,8 @@
-import React, { useState } from 'react';
+import { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { Mail, ArrowRight, ArrowLeft } from 'lucide-react';
 import toast from 'react-hot-toast';
-import { authService } from '../services/api';
+import { authService, getErrorMessage } from '../services/api';
 
 const ForgotPassword = () => {
   const navigate = useNavigate();
@@ -11,6 +11,7 @@ const ForgotPassword = () => {
 
   const handleSubmit = async (e) => {
     e.preventDefault();
+    if (loading) return;
     setLoading(true);
     try {
       const response = await authService.forgotPassword({ email });
@@ -24,7 +25,7 @@ const ForgotPassword = () => {
 
       navigate('/otp', { state: { email, type: 'forgot_password', devOtp } });
     } catch (error) {
-      toast.error(error.response?.data?.message || 'Failed to send OTP');
+      toast.error(getErrorMessage(error, 'Failed to send OTP'));
     } finally {
       setLoading(false);
     }

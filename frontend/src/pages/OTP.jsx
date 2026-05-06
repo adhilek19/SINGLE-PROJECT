@@ -1,12 +1,13 @@
-import React, { useState, useRef, useEffect } from 'react';
+import { useState, useRef, useEffect } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { ShieldCheck, ArrowRight } from 'lucide-react';
 import toast from 'react-hot-toast';
-import { authService } from '../services/api';
+import { authService, getErrorMessage } from '../services/api';
 
 const OTP = () => {
   const [otp, setOtp] = useState(['', '', '', '', '', '']);
   const [loading, setLoading] = useState(false);
+  const [resendLoading, setResendLoading] = useState(false);
   const inputRefs = useRef([]);
   const navigate = useNavigate();
   const location = useLocation();
@@ -45,6 +46,8 @@ const OTP = () => {
   };
 
   const handleResend = async () => {
+    if (resendLoading) return;
+    setResendLoading(true);
     try {
       const response = await authService.resendOtp({ email });
       const newDevOtp = response.data?.data?.devOtp;
@@ -57,12 +60,15 @@ const OTP = () => {
         toast.success('OTP resent successfully!');
       }
     } catch (error) {
-      toast.error(error.response?.data?.message || 'Failed to resend OTP');
+      toast.error(getErrorMessage(error, 'Failed to resend OTP'));
+    } finally {
+      setResendLoading(false);
     }
   };
 
   const handleSubmit = async (e) => {
     e.preventDefault();
+    if (loading) return;
     const otpValue = otp.join('');
     if (otpValue.length === 6) {
       if (type === 'register') {
@@ -72,7 +78,7 @@ const OTP = () => {
           toast.success('Email verified! You can now login.');
           navigate('/login');
         } catch (error) {
-          toast.error(error.response?.data?.message || 'Verification failed');
+          toast.error(getErrorMessage(error, 'Verification failed'));
         } finally {
           setLoading(false);
         }
@@ -142,8 +148,12 @@ const OTP = () => {
 
         <p className="mt-8 text-sm text-slate-600">
           Didn't receive the email?{' '}
-          <button onClick={handleResend} className="font-semibold text-blue-600 hover:text-blue-500 transition-colors">
-            Click to resend
+          <button
+            onClick={handleResend}
+            disabled={resendLoading}
+            className="font-semibold text-blue-600 hover:text-blue-500 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            {resendLoading ? 'Resending...' : 'Click to resend'}
           </button>
         </p>
       </div>

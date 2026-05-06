@@ -15,6 +15,7 @@ import {
 import toast from 'react-hot-toast';
 import { useDispatch, useSelector } from 'react-redux';
 import { fetchMyRidesThunk } from '../redux/slices/rideSlice';
+import { getErrorMessage } from '../services/api';
 
 const statusStyles = {
   scheduled: 'bg-emerald-100 text-emerald-700 border-emerald-200',
@@ -48,20 +49,26 @@ const MyRides = () => {
   );
 
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState('');
   const [activeTab, setActiveTab] = useState('active');
 
-  useEffect(() => {
-    const fetchRides = async () => {
-      try {
-        await dispatch(fetchMyRidesThunk()).unwrap();
-      } catch (error) {
-        toast.error(typeof error === 'string' ? error : 'Failed to load your rides');
-      } finally {
-        setLoading(false);
-      }
-    };
+  const loadRides = async () => {
+    try {
+      setLoading(true);
+      setError('');
+      await dispatch(fetchMyRidesThunk()).unwrap();
+    } catch (err) {
+      const message =
+        typeof err === 'string' ? err : getErrorMessage(err, 'Failed to load your rides');
+      setError(message);
+      toast.error(message);
+    } finally {
+      setLoading(false);
+    }
+  };
 
-    fetchRides();
+  useEffect(() => {
+    loadRides();
   }, [dispatch]);
 
   const allRides = useMemo(() => {
@@ -192,6 +199,24 @@ const MyRides = () => {
     return (
       <div className="flex-grow flex items-center justify-center min-h-[70vh]">
         <div className="w-12 h-12 border-4 border-blue-200 border-t-blue-600 rounded-full animate-spin" />
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="flex-grow bg-slate-50 px-4 py-10">
+        <div className="max-w-xl mx-auto rounded-2xl border border-rose-200 bg-rose-50 p-6 text-center">
+          <h3 className="text-lg font-black text-rose-900">Could not load rides</h3>
+          <p className="mt-2 text-sm text-rose-700">{error}</p>
+          <button
+            type="button"
+            onClick={loadRides}
+            className="mt-4 rounded-xl bg-rose-700 px-4 py-2 text-sm font-bold text-white hover:bg-rose-800"
+          >
+            Retry
+          </button>
+        </div>
       </div>
     );
   }

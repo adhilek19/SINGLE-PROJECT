@@ -1,4 +1,4 @@
-import React, { Suspense, lazy, useEffect } from 'react';
+import { Suspense, lazy, useEffect, useState } from 'react';
 import {
   BrowserRouter as Router,
   Routes,
@@ -9,7 +9,12 @@ import {
 } from 'react-router-dom';
 import { Toaster } from 'react-hot-toast';
 import { useDispatch, useSelector } from 'react-redux';
-import { setSessionFromOAuth, initAuthThunk } from './redux/slices/authSlice';
+import {
+  setSessionFromOAuth,
+  initAuthThunk,
+  clearSession,
+} from './redux/slices/authSlice';
+import { setAuthFailureHandler } from './services/api';
 
 import Navbar from './components/Navbar';
 import Home from './pages/Home';
@@ -65,29 +70,29 @@ function AuthHandler() {
 
 function TokenHydrator() {
   const dispatch = useDispatch();
-  const { user, token, isHydrated } = useSelector((s) => s.auth);
+  const { isHydrated } = useSelector((s) => s.auth);
 
   useEffect(() => {
-    if (user && !token && !isHydrated) {
+    if (!isHydrated) {
       dispatch(initAuthThunk());
     }
-  }, [user, token, isHydrated, dispatch]);
+  }, [isHydrated, dispatch]);
 
   return null;
 }
 
 const GuestRoute = ({ children }) => {
-  const { token, isHydrated } = useSelector((s) => s.auth);
+  const { token, isHydrated, isInitializing } = useSelector((s) => s.auth);
 
-  if (!isHydrated) return <LoadingScreen />;
+  if (!isHydrated || isInitializing) return <LoadingScreen />;
 
   return token ? <Navigate to="/" replace /> : children;
 };
 
 const ProtectedRoute = ({ children }) => {
-  const { token, isHydrated } = useSelector((s) => s.auth);
+  const { token, isHydrated, isInitializing } = useSelector((s) => s.auth);
 
-  if (!isHydrated) return <LoadingScreen />;
+  if (!isHydrated || isInitializing) return <LoadingScreen />;
 
   return token ? children : <Navigate to="/login" replace />;
 };
@@ -97,6 +102,27 @@ const LazyPage = ({ children }) => (
 );
 
 function App() {
+  const dispatch = useDispatch();
+  const [isOffline, setIsOffline] = useState(!navigator.onLine);
+
+  useEffect(() => {
+    setAuthFailureHandler(() => dispatch(clearSession()));
+    return () => setAuthFailureHandler(null);
+  }, [dispatch]);
+
+  useEffect(() => {
+    const goOnline = () => setIsOffline(false);
+    const goOffline = () => setIsOffline(true);
+
+    window.addEventListener('online', goOnline);
+    window.addEventListener('offline', goOffline);
+
+    return () => {
+      window.removeEventListener('online', goOnline);
+      window.removeEventListener('offline', goOffline);
+    };
+  }, []);
+
   return (
     <Router>
       <AuthHandler />
@@ -104,6 +130,11 @@ function App() {
 
       <div className="min-h-screen bg-slate-50 text-slate-900 flex flex-col font-sans">
         <Toaster position="top-center" />
+        {isOffline ? (
+          <div className="bg-amber-100 text-amber-900 text-center text-sm py-2 px-4 border-b border-amber-300">
+            You are offline. Some actions may not work.
+          </div>
+        ) : null}
         <Navbar />
 
         <main className="flex-grow flex flex-col pb-20 md:pb-0">

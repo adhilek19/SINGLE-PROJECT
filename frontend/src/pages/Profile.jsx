@@ -13,7 +13,7 @@ import {
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { useDispatch } from 'react-redux';
-import { authService } from '../services/api';
+import { authService, getErrorMessage } from '../services/api';
 import { setUser } from '../redux/slices/authSlice';
 
 const getBrowserLocation = () =>
@@ -67,6 +67,7 @@ const Profile = () => {
   const dispatch = useDispatch();
 
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState('');
   const [saving, setSaving] = useState(false);
   const [locationSaving, setLocationSaving] = useState(false);
 
@@ -123,11 +124,12 @@ const Profile = () => {
     );
   };
 
-  useEffect(() => {
-    const loadProfile = async () => {
-      try {
-        const res = await authService.getProfile();
-        const user = res.data?.data?.user;
+  const loadProfile = async () => {
+    try {
+      setLoading(true);
+      setLoadError('');
+      const res = await authService.getProfile();
+      const user = res.data?.data?.user;
 
         setForm({
           name: user?.name || '',
@@ -167,14 +169,17 @@ const Profile = () => {
           isVerified: Boolean(user?.isVerified),
         });
 
-        syncUser(user);
-      } catch {
-        toast.error('Failed to load profile');
-      } finally {
-        setLoading(false);
-      }
-    };
+      syncUser(user);
+    } catch (err) {
+      const message = getErrorMessage(err, 'Failed to load profile');
+      setLoadError(message);
+      toast.error(message);
+    } finally {
+      setLoading(false);
+    }
+  };
 
+  useEffect(() => {
     loadProfile();
   }, [dispatch]);
 
@@ -237,7 +242,7 @@ const Profile = () => {
 
       toast.success('Profile updated');
     } catch (err) {
-      toast.error(err.response?.data?.message || 'Update failed');
+      toast.error(getErrorMessage(err, 'Update failed'));
     } finally {
       setSaving(false);
     }
@@ -255,7 +260,7 @@ const Profile = () => {
 
       toast.success('Location permission allowed and location updated');
     } catch (err) {
-      toast.error(err?.response?.data?.message || err?.message || 'Unable to update location');
+      toast.error(getErrorMessage(err, 'Unable to update location'));
     } finally {
       setLocationSaving(false);
     }
@@ -265,6 +270,24 @@ const Profile = () => {
     return (
       <div className="flex-grow flex items-center justify-center">
         <div className="w-8 h-8 border-4 border-slate-300 border-t-blue-600 rounded-full animate-spin" />
+      </div>
+    );
+  }
+
+  if (loadError) {
+    return (
+      <div className="flex-grow flex items-center justify-center px-4">
+        <div className="max-w-md w-full rounded-2xl border border-rose-200 bg-rose-50 p-6 text-center">
+          <h3 className="text-lg font-black text-rose-900">Could not load profile</h3>
+          <p className="mt-2 text-sm text-rose-700">{loadError}</p>
+          <button
+            type="button"
+            onClick={loadProfile}
+            className="mt-4 rounded-xl bg-rose-700 px-4 py-2 text-sm font-bold text-white hover:bg-rose-800"
+          >
+            Retry
+          </button>
+        </div>
       </div>
     );
   }

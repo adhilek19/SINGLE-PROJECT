@@ -1,9 +1,10 @@
-import React, { useState } from 'react';
+import { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { Mail, Lock, ArrowRight } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { useDispatch } from 'react-redux';
 import { loginThunk } from '../redux/slices/authSlice';
+import { getErrorMessage } from '../services/api';
 
 const Login = () => {
   const navigate = useNavigate();
@@ -50,6 +51,7 @@ const Login = () => {
 
   const handleSubmit = async (e) => {
     e.preventDefault();
+    if (loading) return;
     setLoading(true);
 
     try {
@@ -65,7 +67,9 @@ const Login = () => {
       toast.success('Logged in successfully!');
       navigate('/');
     } catch (error) {
-      toast.error(typeof error === 'string' ? error : 'Login failed');
+      toast.error(
+        typeof error === 'string' ? error : getErrorMessage(error, 'Login failed')
+      );
     } finally {
       setLoading(false);
     }

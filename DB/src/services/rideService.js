@@ -564,11 +564,29 @@ export const rideService = {
     return rideRepository.listPaginated(params);
   },
 
-  async searchRides({ sourceText, destinationText, date, page = 1, limit = 20 } = {}) {
+  async searchRides({
+    sourceText,
+    destinationText,
+    date,
+    timeFrom,
+    timeTo,
+    vehicleType,
+    minPrice,
+    maxPrice,
+    minSeats,
+    page = 1,
+    limit = 20,
+  } = {}) {
     return rideRepository.searchRides({
       sourceText,
       destinationText,
       date,
+      timeFrom,
+      timeTo,
+      vehicleType,
+      minPrice,
+      maxPrice,
+      minSeats,
       page,
       limit,
     });

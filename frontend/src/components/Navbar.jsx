@@ -1,4 +1,4 @@
-import React from 'react';
+
 import { Link, NavLink, useNavigate } from 'react-router-dom';
 import {
   Car,
@@ -14,7 +14,8 @@ import { logoutThunk } from '../redux/slices/authSlice';
 const Navbar = () => {
   const navigate = useNavigate();
   const dispatch = useDispatch();
-  const user = useSelector((s) => s.auth.user);
+  const { user, isHydrated, isInitializing } = useSelector((s) => s.auth);
+  const authReady = isHydrated && !isInitializing;
 
   const handleLogout = () => {
     dispatch(logoutThunk());
@@ -89,7 +90,9 @@ const Navbar = () => {
               </div>
 
               <div className="flex items-center gap-4 pl-6 border-l border-slate-200">
-                {user ? (
+                {!authReady ? (
+                  <div className="w-20 h-4 bg-slate-200 rounded animate-pulse" />
+                ) : user ? (
                   <>
                     <Link
                       to="/profile"
@@ -144,7 +147,9 @@ const Navbar = () => {
             </span>
           </Link>
 
-          {user ? (
+          {!authReady ? (
+            <div className="w-9 h-9 rounded-full bg-slate-200 animate-pulse" />
+          ) : user ? (
             <Link to="/profile">
               <Avatar size="large" />
             </Link>

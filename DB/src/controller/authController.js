@@ -171,7 +171,11 @@ export const refreshToken = async (req, res, next) => {
 
 export const logout = async (req, res, next) => {
   try {
-    const result = await authService.logout(req.userId, req.tokenJti);
+    const result = await authService.logout(
+      req.userId,
+      req.tokenJti,
+      req.cookies?.refreshToken
+    );
 
     res.clearCookie('refreshToken', clearCookieOptions());
 

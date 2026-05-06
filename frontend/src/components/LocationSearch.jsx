@@ -2,20 +2,37 @@ import React, { useState, useEffect, useRef } from 'react';
 import { MapPin, Loader2 } from 'lucide-react';
 
 const LocationSearch = ({
+  label,
   placeholder,
   iconColor = 'text-slate-400',
   onSelect,
   defaultValue = '',
+  value,
+  onChange,
+  disabled = false,
+  closeSignal = 0,
 }) => {
-  const [query, setQuery] = useState(defaultValue || '');
+  const initialValue =
+    (typeof value === 'string' ? value : value?.name || value?.label || '') ||
+    defaultValue ||
+    '';
+  const [query, setQuery] = useState(initialValue);
   const [results, setResults] = useState([]);
   const [isOpen, setIsOpen] = useState(false);
   const [loading, setLoading] = useState(false);
   const wrapperRef = useRef(null);
 
   useEffect(() => {
-    setQuery(defaultValue || '');
-  }, [defaultValue]);
+    const nextValue =
+      (typeof value === 'string' ? value : value?.name || value?.label || '') ||
+      defaultValue ||
+      '';
+    setQuery(nextValue);
+  }, [defaultValue, value]);
+
+  useEffect(() => {
+    setIsOpen(false);
+  }, [closeSignal]);
 
   useEffect(() => {
     const closeDropdown = (event) => {
@@ -34,7 +51,7 @@ const LocationSearch = ({
     const searchLocation = async () => {
       const trimmedQuery = query.trim();
 
-      if (trimmedQuery.length < 2 || trimmedQuery === (defaultValue || '').trim()) {
+      if (trimmedQuery.length < 2) {
         setResults([]);
         setIsOpen(false);
         return;
@@ -90,28 +107,41 @@ const LocationSearch = ({
     setQuery(selectedPlace.name);
     setResults([]);
     setIsOpen(false);
+    onChange?.(selectedPlace);
     onSelect?.(selectedPlace);
   };
 
   return (
-    <div className="relative flex-1 flex items-center w-full" ref={wrapperRef}>
-      <MapPin className={`w-5 h-5 ${iconColor} mr-3 flex-shrink-0`} />
+    <div className="relative w-full" ref={wrapperRef}>
+      {label ? (
+        <label className="mb-2 block text-sm font-semibold text-slate-700">
+          {label}
+        </label>
+      ) : null}
 
-      <input
-        type="text"
-        value={query}
-        onChange={(e) => setQuery(e.target.value)}
-        onFocus={() => results.length > 0 && setIsOpen(true)}
-        placeholder={placeholder}
-        className="w-full text-slate-900 placeholder:text-slate-400 focus:outline-none text-lg bg-transparent"
-      />
+      <div className="relative flex-1 flex items-center w-full rounded-xl border border-slate-300 px-4 py-3 bg-white">
+        <MapPin className={`w-5 h-5 ${iconColor} mr-3 flex-shrink-0`} />
 
-      {loading && (
-        <Loader2 className="w-4 h-4 animate-spin text-slate-400 ml-2" />
-      )}
+        <input
+          type="text"
+          value={query}
+          disabled={disabled}
+          onChange={(e) => setQuery(e.target.value)}
+          onFocus={() => query.trim().length >= 2 && results.length > 0 && setIsOpen(true)}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') setIsOpen(false);
+          }}
+          placeholder={placeholder}
+          className="w-full text-slate-900 placeholder:text-slate-400 focus:outline-none bg-transparent disabled:cursor-not-allowed disabled:opacity-60"
+        />
+
+        {loading && (
+          <Loader2 className="w-4 h-4 animate-spin text-slate-400 ml-2" />
+        )}
+      </div>
 
       {isOpen && results.length > 0 && (
-        <div className="absolute top-full left-0 right-0 mt-2 bg-white rounded-xl shadow-xl border border-slate-100 overflow-hidden z-50">
+        <div className="absolute top-full left-0 right-0 mt-2 max-h-60 overflow-y-auto bg-white rounded-xl shadow-xl border border-slate-100 z-50 md:max-h-72">
           {results.map((place) => (
             <button
               type="button"

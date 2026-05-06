@@ -355,6 +355,17 @@ rideSchema.pre('validate', function () {
   if (this.vehicle) {
     this.vehicle.verified = Boolean(this.vehicle.number && (this.vehicle.image || this.vehicle.model));
   }
+
+  const safeBooked = Number(this.bookedSeats || 0);
+  const safeTotal = Number(this.seatsAvailable || 0);
+
+  if (!Number.isFinite(safeBooked) || safeBooked < 0) {
+    this.bookedSeats = 0;
+  }
+
+  if (Number.isFinite(safeTotal) && Number.isFinite(safeBooked) && safeBooked > safeTotal) {
+    this.invalidate('bookedSeats', 'bookedSeats cannot exceed seatsAvailable');
+  }
 });
 
 rideSchema.virtual('seatsLeft').get(function () {

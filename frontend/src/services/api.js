@@ -1,7 +1,12 @@
 import axios from 'axios';
 
-const API_URL =
-  import.meta.env.VITE_API_URL || 'https://sahayatri-p95g.onrender.com/api';
+const backendUrl = import.meta.env.VITE_BACKEND_URL;
+const apiUrlFromEnv = import.meta.env.VITE_API_URL;
+
+const API_URL = apiUrlFromEnv
+  || (backendUrl
+    ? `${backendUrl.replace(/\/$/, '')}/api`
+    : 'https://sahayatri-p95g.onrender.com/api');
 
 let _accessToken = null;
 
@@ -16,10 +21,33 @@ export const tokenStore = {
 };
 
 let refreshPromise = null;
+let onAuthFailure = null;
+
+export const setAuthFailureHandler = (handler) => {
+  onAuthFailure = typeof handler === 'function' ? handler : null;
+};
+
+export const getErrorMessage = (error, fallback = 'Something went wrong') => {
+  if (!error) return fallback;
+  if (!navigator.onLine) return 'You are offline. Some actions may not work.';
+  if (error?.code === 'ECONNABORTED') return 'Request timed out. Network seems slow, please try again.';
+
+  const serverMessage =
+    error?.response?.data?.message ||
+    error?.response?.data?.error ||
+    error?.message;
+
+  if (typeof serverMessage === 'string' && serverMessage.trim()) {
+    return serverMessage;
+  }
+
+  return fallback;
+};
 
 const api = axios.create({
   baseURL: API_URL,
   withCredentials: true,
+  timeout: 20000,
 });
 
 api.interceptors.request.use((config) => {
@@ -93,6 +121,10 @@ api.interceptors.response.use(
     } catch {
       tokenStore.clear();
       localStorage.removeItem('authUser');
+      if (onAuthFailure) onAuthFailure();
+      if (window.location.pathname !== '/login') {
+        window.location.assign('/login');
+      }
       return Promise.reject(error);
     }
   }

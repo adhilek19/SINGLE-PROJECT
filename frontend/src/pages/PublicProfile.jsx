@@ -14,7 +14,7 @@ import {
   Users,
 } from 'lucide-react';
 import toast from 'react-hot-toast';
-import { authService } from '../services/api';
+import { authService, getErrorMessage } from '../services/api';
 
 const formatDateTime = (value) => {
   if (!value) return 'Date not set';
@@ -105,31 +105,35 @@ const PublicProfile = () => {
   const navigate = useNavigate();
 
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState('');
   const [profile, setProfile] = useState(null);
   const [reviews, setReviews] = useState([]);
   const [recentDriverRides, setRecentDriverRides] = useState([]);
   const [recentPassengerRides, setRecentPassengerRides] = useState([]);
   const [stats, setStats] = useState({});
 
-  useEffect(() => {
-    const loadProfile = async () => {
-      try {
-        const res = await authService.getPublicProfile(id);
-        const data = res.data?.data || {};
+  const loadProfile = async () => {
+    try {
+      setLoading(true);
+      setLoadError('');
+      const res = await authService.getPublicProfile(id);
+      const data = res.data?.data || {};
 
         setProfile(data.user || null);
         setReviews(data.reviews || []);
         setRecentDriverRides(data.recentDriverRides || []);
         setRecentPassengerRides(data.recentPassengerRides || []);
         setStats(data.stats || {});
-      } catch (err) {
-        toast.error(err.response?.data?.message || 'User not found');
-        navigate('/find-ride');
-      } finally {
-        setLoading(false);
-      }
-    };
+    } catch (err) {
+      const message = getErrorMessage(err, 'User not found');
+      setLoadError(message);
+      toast.error(message);
+    } finally {
+      setLoading(false);
+    }
+  };
 
+  useEffect(() => {
     loadProfile();
   }, [id, navigate]);
 
@@ -137,6 +141,33 @@ const PublicProfile = () => {
     return (
       <div className="flex-grow flex items-center justify-center">
         <div className="w-8 h-8 border-4 border-slate-300 border-t-blue-600 rounded-full animate-spin" />
+      </div>
+    );
+  }
+
+  if (loadError) {
+    return (
+      <div className="flex-grow flex items-center justify-center px-4">
+        <div className="max-w-md w-full rounded-2xl border border-rose-200 bg-rose-50 p-6 text-center">
+          <h3 className="text-lg font-black text-rose-900">Unable to load public profile</h3>
+          <p className="mt-2 text-sm text-rose-700">{loadError}</p>
+          <div className="mt-4 flex items-center justify-center gap-2">
+            <button
+              type="button"
+              onClick={loadProfile}
+              className="rounded-xl bg-rose-700 px-4 py-2 text-sm font-bold text-white hover:bg-rose-800"
+            >
+              Retry
+            </button>
+            <button
+              type="button"
+              onClick={() => navigate('/find-ride')}
+              className="rounded-xl bg-slate-900 px-4 py-2 text-sm font-bold text-white"
+            >
+              Back to rides
+            </button>
+          </div>
+        </div>
       </div>
     );
   }

@@ -1,17 +1,24 @@
-import React, { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import {
   Calendar,
   Car,
   IndianRupee,
   LocateFixed,
+  RefreshCw,
   Search,
   Star,
   Users,
 } from 'lucide-react';
 import { Link, useSearchParams } from 'react-router-dom';
 import toast from 'react-hot-toast';
+import { useSelector } from 'react-redux';
 import LocationSearch from '../components/LocationSearch';
-import { rideService } from '../services/api';
+import { getErrorMessage, rideService } from '../services/api';
+
+const SEARCH_HISTORY_KEY = 'rideSearchHistory';
+const SEARCH_STATE_KEY = 'rideSearchState';
+const HISTORY_LIMIT = 3;
+const SEARCH_WINDOW_HOURS = 6;
 
 const EmptyState = ({ title, message }) => (
   <div className="rounded-3xl border border-dashed border-slate-300 bg-white p-10 text-center">
@@ -27,6 +34,21 @@ const EmptyState = ({ title, message }) => (
   </div>
 );
 
+const ErrorState = ({ message, onRetry }) => (
+  <div className="rounded-3xl border border-rose-200 bg-rose-50 p-8 text-center">
+    <h3 className="text-xl font-black text-rose-900">Search failed</h3>
+    <p className="mx-auto mt-2 max-w-md text-sm text-rose-700">{message}</p>
+    <button
+      type="button"
+      onClick={onRetry}
+      className="mt-5 inline-flex items-center gap-2 rounded-xl bg-rose-700 px-4 py-2 text-sm font-bold text-white hover:bg-rose-800"
+    >
+      <RefreshCw size={16} />
+      Retry search
+    </button>
+  </div>
+);
+
 const formatDateTime = (value) => {
   if (!value) return 'Not set';
 
@@ -36,11 +58,57 @@ const formatDateTime = (value) => {
   });
 };
 
-const RideCard = ({ ride }) => {
+const formatHistoryDateTime = (date, time) => {
+  if (!date && !time) return 'Any time';
+  if (date && !time) return date;
+  if (!date && time) return time;
+  return `${date} ${time}`;
+};
+
+const parseNumberIfValid = (value) => {
+  if (value === '' || value === null || value === undefined) return undefined;
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : undefined;
+};
+
+const getSearchText = (place) => {
+  if (!place) return '';
+  if (typeof place === 'string') return place;
+  return place.name || place.label || '';
+};
+
+const normalizeListResponse = (res) => {
+  const data = res?.data?.data;
+  if (Array.isArray(data?.rides)) return data.rides;
+  if (Array.isArray(data)) return data;
+  return [];
+};
+
+const makeHistoryItem = ({ fromText, toText, dateTime, filters }) => {
+  const dt = dateTime ? new Date(dateTime) : null;
+  const date = dt && !Number.isNaN(dt.getTime()) ? dt.toISOString().slice(0, 10) : '';
+  const time = dt && !Number.isNaN(dt.getTime()) ? dt.toTimeString().slice(0, 5) : '';
+
+  return {
+    source: fromText,
+    destination: toText,
+    date,
+    time,
+    dateTime: dateTime || '',
+    filters,
+  };
+};
+
+const historyEquals = (a, b) =>
+  JSON.stringify(a || {}) === JSON.stringify(b || {});
+
+const RideCard = ({ ride, currentUserId }) => {
   const driver = ride.driverInfo || ride.driver || {};
   const seatsLeft =
     ride.seatsLeft ??
     Math.max(0, Number(ride.seatsAvailable || 0) - Number(ride.bookedSeats || 0));
+  const isOwner = Boolean(currentUserId && String(driver._id || ride.driver) === String(currentUserId));
+  const isFull = seatsLeft <= 0;
 
   return (
     <div className="overflow-hidden rounded-3xl bg-white shadow-sm ring-1 ring-slate-200 transition hover:-translate-y-1 hover:shadow-xl">
@@ -62,7 +130,10 @@ const RideCard = ({ ride }) => {
             {ride.source?.name || 'Source'} to {ride.destination?.name || 'Destination'}
           </h3>
 
-          <p className="mt-1 text-sm text-slate-500">
+          <p className="mt-1 text-sm text-slate-500 flex items-center gap-2">
+            {driver.profilePic ? (
+              <img src={driver.profilePic} alt={driver.name || 'Driver'} className="h-6 w-6 rounded-full object-cover" />
+            ) : null}
             by{' '}
             {driver._id ? (
               <Link
@@ -98,20 +169,6 @@ const RideCard = ({ ride }) => {
             {ride.vehicle?.type || 'Vehicle'}
             {ride.vehicle?.model ? ` - ${ride.vehicle.model}` : ''}
           </div>
-
-          <div className="flex flex-wrap gap-2 pt-2">
-            {ride.preferences?.womenOnly ? <span className="rounded-full bg-pink-100 px-2 py-1 text-xs font-bold text-pink-700">Women-only</span> : null}
-            {ride.preferences?.verifiedOnly ? <span className="rounded-full bg-blue-100 px-2 py-1 text-xs font-bold text-blue-700">Verified-only</span> : null}
-            {ride.preferences?.acAvailable ? <span className="rounded-full bg-cyan-100 px-2 py-1 text-xs font-bold text-cyan-700">AC</span> : null}
-            {ride.preferences?.musicAllowed ? <span className="rounded-full bg-violet-100 px-2 py-1 text-xs font-bold text-violet-700">Music</span> : null}
-            {ride.preferences?.petsAllowed ? <span className="rounded-full bg-amber-100 px-2 py-1 text-xs font-bold text-amber-700">Pets</span> : null}
-          </div>
-
-          {Number.isFinite(Number(ride.distanceMeters)) ? (
-            <div className="text-xs font-semibold text-emerald-700">
-              {(Number(ride.distanceMeters) / 1000).toFixed(1)} km away
-            </div>
-          ) : null}
         </div>
 
         {driver.rating ? (
@@ -128,6 +185,20 @@ const RideCard = ({ ride }) => {
           >
             View Details
           </Link>
+
+          {!isOwner ? (
+            <Link
+              to={`/ride/${ride._id}`}
+              aria-disabled={isFull}
+              className={`flex-1 rounded-2xl px-4 py-3 text-center text-sm font-bold transition ${
+                isFull
+                  ? 'bg-slate-200 text-slate-500 pointer-events-none'
+                  : 'bg-emerald-600 text-white hover:bg-emerald-700'
+              }`}
+            >
+              {isFull ? 'Ride Full' : 'Request Seat'}
+            </Link>
+          ) : null}
         </div>
       </div>
     </div>
@@ -136,26 +207,27 @@ const RideCard = ({ ride }) => {
 
 const FindRide = () => {
   const [searchParams, setSearchParams] = useSearchParams();
+  const currentUserId = useSelector((s) => s.auth.user?._id || s.auth.user?.id);
 
   const [from, setFrom] = useState(null);
   const [to, setTo] = useState(null);
-  const [dateTime, setDateTime] = useState(searchParams.get('date') || '');
-  const [vehicleType, setVehicleType] = useState(searchParams.get('vehicleType') || '');
-  const [minPrice, setMinPrice] = useState(searchParams.get('minPrice') || '');
-  const [maxPrice, setMaxPrice] = useState(searchParams.get('maxPrice') || '');
-  const [seats, setSeats] = useState(searchParams.get('seats') || '');
-  const [radiusKm, setRadiusKm] = useState(searchParams.get('radiusKm') || '');
-  const [sort, setSort] = useState(searchParams.get('sort') || 'departure_time');
-  const [lat, setLat] = useState(searchParams.get('lat') || '');
-  const [lng, setLng] = useState(searchParams.get('lng') || '');
+  const [dateTime, setDateTime] = useState('');
+  const [vehicleType, setVehicleType] = useState('');
+  const [minPrice, setMinPrice] = useState('');
+  const [maxPrice, setMaxPrice] = useState('');
+  const [seats, setSeats] = useState('');
+  const [radiusKm, setRadiusKm] = useState('');
+  const [sort, setSort] = useState('departure_time');
+  const [lat, setLat] = useState('');
+  const [lng, setLng] = useState('');
   const [preferenceFilters, setPreferenceFilters] = useState({
-    womenOnly: searchParams.get('womenOnly') === 'true',
-    verifiedOnly: searchParams.get('verifiedOnly') === 'true',
-    smokingAllowed: searchParams.get('smokingAllowed') === 'true',
-    musicAllowed: searchParams.get('musicAllowed') === 'true',
-    petsAllowed: searchParams.get('petsAllowed') === 'true',
-    acAvailable: searchParams.get('acAvailable') === 'true',
-    genderPreference: searchParams.get('genderPreference') || '',
+    womenOnly: false,
+    verifiedOnly: false,
+    smokingAllowed: false,
+    musicAllowed: false,
+    petsAllowed: false,
+    acAvailable: false,
+    genderPreference: '',
   });
 
   const [rides, setRides] = useState([]);
@@ -163,29 +235,163 @@ const FindRide = () => {
   const [locating, setLocating] = useState(false);
   const [nearbyMode, setNearbyMode] = useState(false);
   const [nearbyCount, setNearbyCount] = useState(0);
+  const [searchError, setSearchError] = useState('');
+  const [lastSearchParams, setLastSearchParams] = useState(null);
+  const [recentSearches, setRecentSearches] = useState([]);
+  const [closeSuggestionsSignal, setCloseSuggestionsSignal] = useState(0);
 
-  const getSearchText = (place) => {
-    if (!place) return '';
-    if (typeof place === 'string') return place;
-    return place.name || place.label || '';
+  const fromText = getSearchText(from);
+  const toText = getSearchText(to);
+
+  const noQueryTyped = !fromText && !toText;
+
+  const meaningfulSearchExists = useMemo(() => {
+    return Boolean(
+      fromText ||
+      toText ||
+      dateTime ||
+      vehicleType ||
+      minPrice !== '' ||
+      maxPrice !== '' ||
+      seats !== '' ||
+      radiusKm !== '' ||
+      Object.values(preferenceFilters).some((value) => value !== '' && value !== false)
+    );
+  }, [
+    fromText,
+    toText,
+    dateTime,
+    vehicleType,
+    minPrice,
+    maxPrice,
+    seats,
+    radiusKm,
+    preferenceFilters,
+  ]);
+
+  const saveSearchState = () => {
+    const payload = {
+      from,
+      to,
+      dateTime,
+      vehicleType,
+      minPrice,
+      maxPrice,
+      seats,
+      radiusKm,
+      sort,
+      lat,
+      lng,
+      preferenceFilters,
+    };
+    localStorage.setItem(SEARCH_STATE_KEY, JSON.stringify(payload));
   };
 
-  const normalizeListResponse = (res) => {
-    const data = res?.data?.data;
-    if (Array.isArray(data?.rides)) return data.rides;
-    if (Array.isArray(data)) return data;
-    return [];
+  const saveSearchHistory = () => {
+    const historyItem = makeHistoryItem({
+      fromText,
+      toText,
+      dateTime,
+      filters: {
+        vehicleType,
+        minPrice,
+        maxPrice,
+        seats,
+        radiusKm,
+        sort,
+        preferenceFilters,
+      },
+    });
+
+    if (!historyItem.source && !historyItem.destination) return;
+
+    setRecentSearches((prev) => {
+      const deduped = prev.filter((item) => !historyEquals(item, historyItem));
+      const next = [historyItem, ...deduped].slice(0, HISTORY_LIMIT);
+      localStorage.setItem(SEARCH_HISTORY_KEY, JSON.stringify(next));
+      return next;
+    });
+  };
+
+  const buildTimeWindow = (rawDateTime) => {
+    if (!rawDateTime) return {};
+
+    const selected = new Date(rawDateTime);
+    if (Number.isNaN(selected.getTime())) {
+      throw new Error('Invalid date/time selected for search');
+    }
+
+    const toWindow = new Date(selected.getTime() + SEARCH_WINDOW_HOURS * 60 * 60 * 1000);
+
+    return {
+      timeFrom: selected.toISOString(),
+      timeTo: toWindow.toISOString(),
+      date: selected.toISOString().slice(0, 10),
+    };
+  };
+
+  const buildParamsFromState = () => {
+    const params = {
+      page: 1,
+      limit: 30,
+      sort,
+    };
+
+    if (fromText) params.from = fromText;
+    if (toText) params.to = toText;
+
+    const timeWindow = buildTimeWindow(dateTime);
+    Object.assign(params, timeWindow);
+
+    if (vehicleType) params.vehicleType = vehicleType;
+
+    const parsedMinPrice = parseNumberIfValid(minPrice);
+    const parsedMaxPrice = parseNumberIfValid(maxPrice);
+    const parsedSeats = parseNumberIfValid(seats);
+    const parsedLat = parseNumberIfValid(lat);
+    const parsedLng = parseNumberIfValid(lng);
+    const parsedRadius = parseNumberIfValid(radiusKm);
+
+    if (parsedMinPrice !== undefined) params.minPrice = parsedMinPrice;
+    if (parsedMaxPrice !== undefined) params.maxPrice = parsedMaxPrice;
+    if (parsedSeats !== undefined) params.seats = parsedSeats;
+    if (parsedLat !== undefined && parsedLng !== undefined) {
+      params.lat = parsedLat;
+      params.lng = parsedLng;
+    }
+    if (parsedRadius !== undefined) params.radiusKm = parsedRadius;
+
+    Object.entries(preferenceFilters).forEach(([key, value]) => {
+      if (value !== false && value !== '') params[key] = value;
+    });
+
+    return params;
+  };
+
+  const applySearchParamsToUrl = (params) => {
+    const next = new URLSearchParams();
+    Object.entries(params).forEach(([k, v]) => {
+      if (v !== undefined && v !== null && v !== '') next.set(k, String(v));
+    });
+    setSearchParams(next);
   };
 
   const fetchRides = async (params = {}) => {
+    if (loading) return;
+
     try {
       setLoading(true);
+      setSearchError('');
+      setLastSearchParams(params);
       const res = await rideService.getRides(params);
       setRides(normalizeListResponse(res));
       setNearbyMode(false);
       setNearbyCount(0);
+      saveSearchState();
+      saveSearchHistory();
     } catch (err) {
-      toast.error(err?.response?.data?.message || 'Failed to fetch rides');
+      const message = getErrorMessage(err, 'Failed to fetch rides');
+      setSearchError(message);
       setRides([]);
     } finally {
       setLoading(false);
@@ -198,15 +404,17 @@ const FindRide = () => {
     radius = 10,
     extra = {},
   }) => {
+    if (loading) return;
+
     try {
       setLoading(true);
+      setSearchError('');
       const res = await rideService.nearbyRides({
         lat: latValue,
         lng: lngValue,
         radiusKm: radius,
         vehicleType: vehicleType || undefined,
-        seats: seats || undefined,
-        ...Object.fromEntries(Object.entries(preferenceFilters).filter(([, v]) => v !== false && v !== '')),
+        seats: parseNumberIfValid(seats),
         page: 1,
         limit: 30,
         ...extra,
@@ -220,55 +428,31 @@ const FindRide = () => {
     } catch (err) {
       setNearbyMode(false);
       setNearbyCount(0);
-      toast.error(err?.response?.data?.message || 'Failed to fetch nearby rides');
+      setSearchError(getErrorMessage(err, 'Failed to fetch nearby rides'));
     } finally {
       setLoading(false);
     }
   };
 
-  const buildParamsFromState = () => {
-    const params = {
-      page: 1,
-      limit: 30,
-      sort,
-    };
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    if (loading) return;
 
-    const fromText = getSearchText(from);
-    const toText = getSearchText(to);
+    setCloseSuggestionsSignal((prev) => prev + 1);
 
-    if (fromText) params.from = fromText;
-    if (toText) params.to = toText;
-    if (dateTime) params.date = dateTime;
-    if (vehicleType) params.vehicleType = vehicleType;
-    if (minPrice !== '') params.minPrice = Number(minPrice);
-    if (maxPrice !== '') params.maxPrice = Number(maxPrice);
-    if (seats !== '') params.seats = Number(seats);
-    if (lat !== '' && lng !== '') {
-      params.lat = Number(lat);
-      params.lng = Number(lng);
+    try {
+      const params = buildParamsFromState();
+      applySearchParamsToUrl(params);
+      await fetchRides(params);
+    } catch (err) {
+      setSearchError(err?.message || 'Invalid search inputs');
+      toast.error(err?.message || 'Invalid search inputs');
     }
-    if (radiusKm !== '') params.radiusKm = Number(radiusKm);
-    Object.entries(preferenceFilters).forEach(([key, value]) => {
-      if (value !== false && value !== '') params[key] = value;
-    });
-
-    return params;
   };
 
-  const handleSubmit = (e) => {
-    e.preventDefault();
-
-    const params = buildParamsFromState();
-    const next = new URLSearchParams();
-
-    Object.entries(params).forEach(([k, v]) => {
-      if (v !== undefined && v !== null && v !== '') {
-        next.set(k, String(v));
-      }
-    });
-
-    setSearchParams(next);
-    fetchRides(params);
+  const handleRetry = () => {
+    if (!lastSearchParams) return;
+    fetchRides(lastSearchParams);
   };
 
   const useCurrentLocation = () => {
@@ -276,6 +460,8 @@ const FindRide = () => {
       toast.error('Geolocation not supported');
       return;
     }
+
+    if (locating) return;
 
     setLocating(true);
     navigator.geolocation.getCurrentPosition(
@@ -288,7 +474,7 @@ const FindRide = () => {
       },
       () => {
         setLocating(false);
-        toast.error('Location permission denied');
+        toast.error('Location permission denied. You can still search manually.');
       },
       {
         enableHighAccuracy: true,
@@ -297,42 +483,149 @@ const FindRide = () => {
     );
   };
 
+  const applyHistoryItem = (item) => {
+    setFrom(item?.source ? { name: item.source } : null);
+    setTo(item?.destination ? { name: item.destination } : null);
+    setDateTime(item?.dateTime || '');
+
+    const filters = item?.filters || {};
+    setVehicleType(filters.vehicleType || '');
+    setMinPrice(filters.minPrice || '');
+    setMaxPrice(filters.maxPrice || '');
+    setSeats(filters.seats || '');
+    setRadiusKm(filters.radiusKm || '');
+    setSort(filters.sort || 'departure_time');
+    setPreferenceFilters(filters.preferenceFilters || {
+      womenOnly: false,
+      verifiedOnly: false,
+      smokingAllowed: false,
+      musicAllowed: false,
+      petsAllowed: false,
+      acAvailable: false,
+      genderPreference: '',
+    });
+  };
+
   useEffect(() => {
-    const fromText = searchParams.get('from') || searchParams.get('source') || '';
-    const toText =
-      searchParams.get('to') || searchParams.get('destination') || '';
+    const savedHistory = localStorage.getItem(SEARCH_HISTORY_KEY);
+    if (savedHistory) {
+      try {
+        const parsed = JSON.parse(savedHistory);
+        if (Array.isArray(parsed)) setRecentSearches(parsed.slice(0, HISTORY_LIMIT));
+      } catch {
+        // ignore corrupt history
+      }
+    }
 
-    if (fromText) setFrom({ name: fromText });
-    if (toText) setTo({ name: toText });
-
-    const initialParams = {
-      page: Number(searchParams.get('page') || 1),
-      limit: Number(searchParams.get('limit') || 30),
+    const paramsFromUrl = {
+      from: searchParams.get('from') || searchParams.get('source') || '',
+      to: searchParams.get('to') || searchParams.get('destination') || '',
+      dateTime: searchParams.get('dateTime') || '',
+      vehicleType: searchParams.get('vehicleType') || '',
+      minPrice: searchParams.get('minPrice') || '',
+      maxPrice: searchParams.get('maxPrice') || '',
+      seats: searchParams.get('seats') || '',
+      radiusKm: searchParams.get('radiusKm') || '',
       sort: searchParams.get('sort') || 'departure_time',
+      lat: searchParams.get('lat') || '',
+      lng: searchParams.get('lng') || '',
+      preferenceFilters: {
+        womenOnly: searchParams.get('womenOnly') === 'true',
+        verifiedOnly: searchParams.get('verifiedOnly') === 'true',
+        smokingAllowed: searchParams.get('smokingAllowed') === 'true',
+        musicAllowed: searchParams.get('musicAllowed') === 'true',
+        petsAllowed: searchParams.get('petsAllowed') === 'true',
+        acAvailable: searchParams.get('acAvailable') === 'true',
+        genderPreference: searchParams.get('genderPreference') || '',
+      },
     };
 
-    if (fromText) initialParams.from = fromText;
-    if (toText) initialParams.to = toText;
-    if (searchParams.get('date')) initialParams.date = searchParams.get('date');
-    if (searchParams.get('vehicleType')) {
-      initialParams.vehicleType = searchParams.get('vehicleType');
-    }
-    if (searchParams.get('minPrice')) initialParams.minPrice = searchParams.get('minPrice');
-    if (searchParams.get('maxPrice')) initialParams.maxPrice = searchParams.get('maxPrice');
-    if (searchParams.get('seats')) initialParams.seats = searchParams.get('seats');
-    if (searchParams.get('lat')) initialParams.lat = searchParams.get('lat');
-    if (searchParams.get('lng')) initialParams.lng = searchParams.get('lng');
-    if (searchParams.get('radiusKm')) initialParams.radiusKm = searchParams.get('radiusKm');
-    ['womenOnly', 'verifiedOnly', 'smokingAllowed', 'musicAllowed', 'petsAllowed', 'acAvailable', 'genderPreference'].forEach((key) => {
-      if (searchParams.get(key)) initialParams[key] = searchParams.get(key);
+    const hasUrlState = Object.values(paramsFromUrl).some((v) => {
+      if (typeof v === 'object') {
+        return Object.values(v).some((inner) => inner !== '' && inner !== false);
+      }
+      return v !== '';
     });
 
-    fetchRides(initialParams);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+    if (hasUrlState) {
+      if (paramsFromUrl.from) setFrom({ name: paramsFromUrl.from });
+      if (paramsFromUrl.to) setTo({ name: paramsFromUrl.to });
+      setDateTime(paramsFromUrl.dateTime);
+      setVehicleType(paramsFromUrl.vehicleType);
+      setMinPrice(paramsFromUrl.minPrice);
+      setMaxPrice(paramsFromUrl.maxPrice);
+      setSeats(paramsFromUrl.seats);
+      setRadiusKm(paramsFromUrl.radiusKm);
+      setSort(paramsFromUrl.sort);
+      setLat(paramsFromUrl.lat);
+      setLng(paramsFromUrl.lng);
+      setPreferenceFilters(paramsFromUrl.preferenceFilters);
 
-  useEffect(() => {
-    if (!navigator.geolocation) return;
+      const initialParams = {
+        page: Number(searchParams.get('page') || 1),
+        limit: Number(searchParams.get('limit') || 30),
+        sort: paramsFromUrl.sort,
+      };
+      if (paramsFromUrl.from) initialParams.from = paramsFromUrl.from;
+      if (paramsFromUrl.to) initialParams.to = paramsFromUrl.to;
+      if (paramsFromUrl.dateTime) {
+        const selected = new Date(paramsFromUrl.dateTime);
+        if (!Number.isNaN(selected.getTime())) {
+          initialParams.timeFrom = selected.toISOString();
+          initialParams.timeTo = new Date(selected.getTime() + SEARCH_WINDOW_HOURS * 60 * 60 * 1000).toISOString();
+          initialParams.date = selected.toISOString().slice(0, 10);
+        }
+      }
+      if (paramsFromUrl.vehicleType) initialParams.vehicleType = paramsFromUrl.vehicleType;
+      if (paramsFromUrl.minPrice !== '') initialParams.minPrice = Number(paramsFromUrl.minPrice);
+      if (paramsFromUrl.maxPrice !== '') initialParams.maxPrice = Number(paramsFromUrl.maxPrice);
+      if (paramsFromUrl.seats !== '') initialParams.seats = Number(paramsFromUrl.seats);
+      if (paramsFromUrl.lat !== '' && paramsFromUrl.lng !== '') {
+        initialParams.lat = Number(paramsFromUrl.lat);
+        initialParams.lng = Number(paramsFromUrl.lng);
+      }
+      if (paramsFromUrl.radiusKm !== '') initialParams.radiusKm = Number(paramsFromUrl.radiusKm);
+      Object.entries(paramsFromUrl.preferenceFilters).forEach(([key, value]) => {
+        if (value !== '' && value !== false) initialParams[key] = value;
+      });
+
+      fetchRides(initialParams);
+      return;
+    }
+
+    const savedState = localStorage.getItem(SEARCH_STATE_KEY);
+    if (savedState) {
+      try {
+        const parsed = JSON.parse(savedState);
+        if (parsed?.from) setFrom(parsed.from);
+        if (parsed?.to) setTo(parsed.to);
+        setDateTime(parsed?.dateTime || '');
+        setVehicleType(parsed?.vehicleType || '');
+        setMinPrice(parsed?.minPrice || '');
+        setMaxPrice(parsed?.maxPrice || '');
+        setSeats(parsed?.seats || '');
+        setRadiusKm(parsed?.radiusKm || '');
+        setSort(parsed?.sort || 'departure_time');
+        setLat(parsed?.lat || '');
+        setLng(parsed?.lng || '');
+        setPreferenceFilters(parsed?.preferenceFilters || {
+          womenOnly: false,
+          verifiedOnly: false,
+          smokingAllowed: false,
+          musicAllowed: false,
+          petsAllowed: false,
+          acAvailable: false,
+          genderPreference: '',
+        });
+      } catch {
+        // ignore invalid state
+      }
+    }
+
+    if (!navigator.geolocation) {
+      fetchRides({ page: 1, limit: 30, sort: 'departure_time' });
+      return;
+    }
 
     setLocating(true);
     navigator.geolocation.getCurrentPosition(
@@ -354,6 +647,7 @@ const FindRide = () => {
       },
       () => {
         setLocating(false);
+        fetchRides({ page: 1, limit: 30, sort: 'departure_time' });
       },
       {
         enableHighAccuracy: true,
@@ -383,6 +677,8 @@ const FindRide = () => {
             value={from}
             onChange={setFrom}
             placeholder="Source location"
+            disabled={loading}
+            closeSignal={closeSuggestionsSignal}
           />
 
           <LocationSearch
@@ -390,6 +686,8 @@ const FindRide = () => {
             value={to}
             onChange={setTo}
             placeholder="Destination location"
+            disabled={loading}
+            closeSignal={closeSuggestionsSignal}
           />
 
           <div>
@@ -399,8 +697,9 @@ const FindRide = () => {
             <input
               type="datetime-local"
               value={dateTime}
+              disabled={loading}
               onChange={(e) => setDateTime(e.target.value)}
-              className="w-full rounded-xl border border-slate-300 px-4 py-3 outline-none transition focus:border-emerald-500 focus:ring-2 focus:ring-emerald-100"
+              className="w-full rounded-xl border border-slate-300 px-4 py-3 outline-none transition focus:border-emerald-500 focus:ring-2 focus:ring-emerald-100 disabled:cursor-not-allowed disabled:opacity-60"
             />
           </div>
 
@@ -410,8 +709,9 @@ const FindRide = () => {
             </label>
             <select
               value={vehicleType}
+              disabled={loading}
               onChange={(e) => setVehicleType(e.target.value)}
-              className="w-full rounded-xl border border-slate-300 px-4 py-3 outline-none transition focus:border-emerald-500 focus:ring-2 focus:ring-emerald-100"
+              className="w-full rounded-xl border border-slate-300 px-4 py-3 outline-none transition focus:border-emerald-500 focus:ring-2 focus:ring-emerald-100 disabled:cursor-not-allowed disabled:opacity-60"
             >
               <option value="">Any</option>
               <option value="bike">Bike</option>
@@ -429,8 +729,10 @@ const FindRide = () => {
               type="number"
               min="0"
               value={minPrice}
+              disabled={loading}
               onChange={(e) => setMinPrice(e.target.value)}
-              className="w-full rounded-xl border border-slate-300 px-4 py-3 outline-none transition focus:border-emerald-500 focus:ring-2 focus:ring-emerald-100"
+              className="w-full rounded-xl border border-slate-300 px-4 py-3 outline-none transition focus:border-emerald-500 focus:ring-2 focus:ring-emerald-100 disabled:cursor-not-allowed disabled:opacity-60"
+              placeholder="Any"
             />
           </div>
 
@@ -442,8 +744,10 @@ const FindRide = () => {
               type="number"
               min="0"
               value={maxPrice}
+              disabled={loading}
               onChange={(e) => setMaxPrice(e.target.value)}
-              className="w-full rounded-xl border border-slate-300 px-4 py-3 outline-none transition focus:border-emerald-500 focus:ring-2 focus:ring-emerald-100"
+              className="w-full rounded-xl border border-slate-300 px-4 py-3 outline-none transition focus:border-emerald-500 focus:ring-2 focus:ring-emerald-100 disabled:cursor-not-allowed disabled:opacity-60"
+              placeholder="Any"
             />
           </div>
 
@@ -451,13 +755,18 @@ const FindRide = () => {
             <label className="mb-2 block text-sm font-semibold text-slate-700">
               Available Seats
             </label>
-            <input
-              type="number"
-              min="1"
+            <select
               value={seats}
+              disabled={loading}
               onChange={(e) => setSeats(e.target.value)}
-              className="w-full rounded-xl border border-slate-300 px-4 py-3 outline-none transition focus:border-emerald-500 focus:ring-2 focus:ring-emerald-100"
-            />
+              className="w-full rounded-xl border border-slate-300 px-4 py-3 outline-none transition focus:border-emerald-500 focus:ring-2 focus:ring-emerald-100 disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              <option value="">Any</option>
+              <option value="1">1+</option>
+              <option value="2">2+</option>
+              <option value="3">3+</option>
+              <option value="4">4+</option>
+            </select>
           </div>
 
           <div>
@@ -466,8 +775,9 @@ const FindRide = () => {
             </label>
             <select
               value={sort}
+              disabled={loading}
               onChange={(e) => setSort(e.target.value)}
-              className="w-full rounded-xl border border-slate-300 px-4 py-3 outline-none transition focus:border-emerald-500 focus:ring-2 focus:ring-emerald-100"
+              className="w-full rounded-xl border border-slate-300 px-4 py-3 outline-none transition focus:border-emerald-500 focus:ring-2 focus:ring-emerald-100 disabled:cursor-not-allowed disabled:opacity-60"
             >
               <option value="departure_time">Departure Time</option>
               <option value="nearest">Nearest</option>
@@ -486,15 +796,16 @@ const FindRide = () => {
                 type="number"
                 min="1"
                 value={radiusKm}
+                disabled={loading}
                 onChange={(e) => setRadiusKm(e.target.value)}
-                className="w-full rounded-xl border border-slate-300 px-4 py-3 outline-none transition focus:border-emerald-500 focus:ring-2 focus:ring-emerald-100"
-                placeholder="e.g. 10"
+                className="w-full rounded-xl border border-slate-300 px-4 py-3 outline-none transition focus:border-emerald-500 focus:ring-2 focus:ring-emerald-100 disabled:cursor-not-allowed disabled:opacity-60"
+                placeholder="Any"
               />
               <button
                 type="button"
                 onClick={useCurrentLocation}
-                disabled={locating}
-                className="whitespace-nowrap rounded-xl border border-slate-300 px-4 py-3 text-sm font-bold text-slate-700 transition hover:bg-slate-100"
+                disabled={locating || loading}
+                className="whitespace-nowrap rounded-xl border border-slate-300 px-4 py-3 text-sm font-bold text-slate-700 transition hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-60"
               >
                 <span className="inline-flex items-center gap-2">
                   <LocateFixed size={16} />
@@ -520,6 +831,7 @@ const FindRide = () => {
                   <input
                     type="checkbox"
                     checked={Boolean(preferenceFilters[key])}
+                    disabled={loading}
                     onChange={(e) => setPreferenceFilters((prev) => ({ ...prev, [key]: e.target.checked }))}
                     className="h-4 w-4 accent-emerald-600"
                   />
@@ -527,8 +839,9 @@ const FindRide = () => {
               ))}
               <select
                 value={preferenceFilters.genderPreference}
+                disabled={loading}
                 onChange={(e) => setPreferenceFilters((prev) => ({ ...prev, genderPreference: e.target.value }))}
-                className="rounded-xl border border-slate-300 px-3 py-2 text-sm font-semibold outline-none"
+                className="rounded-xl border border-slate-300 px-3 py-2 text-sm font-semibold outline-none disabled:cursor-not-allowed disabled:opacity-60"
               >
                 <option value="">Any gender preference</option>
                 <option value="male">Male preference</option>
@@ -540,13 +853,33 @@ const FindRide = () => {
           <div className="lg:col-span-2 flex items-end">
             <button
               type="submit"
-              className="flex w-full items-center justify-center gap-2 rounded-2xl bg-slate-950 px-5 py-3 font-bold text-white transition hover:bg-slate-800"
+              disabled={loading}
+              className="flex w-full items-center justify-center gap-2 rounded-2xl bg-slate-950 px-5 py-3 font-bold text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-60"
             >
               <Search size={18} />
-              Search Rides
+              {loading ? 'Searching rides...' : 'Search Rides'}
             </button>
           </div>
         </form>
+
+        {recentSearches.length > 0 && noQueryTyped ? (
+          <div className="mb-6 rounded-2xl border border-slate-200 bg-white p-4">
+            <p className="mb-3 text-sm font-black text-slate-700">Recent Searches</p>
+            <div className="grid gap-2 md:grid-cols-3">
+              {recentSearches.map((item, index) => (
+                <button
+                  type="button"
+                  key={`${item.source}-${item.destination}-${index}`}
+                  onClick={() => applyHistoryItem(item)}
+                  className="rounded-xl border border-slate-200 px-3 py-2 text-left text-sm hover:bg-slate-50"
+                >
+                  <p className="font-bold text-slate-900">{item.source || 'Any source'} to {item.destination || 'Any destination'}</p>
+                  <p className="text-xs text-slate-500">{formatHistoryDateTime(item.date, item.time)}</p>
+                </button>
+              ))}
+            </div>
+          </div>
+        ) : null}
 
         {nearbyMode ? (
           <p className="mb-6 text-sm font-bold text-emerald-700">
@@ -556,12 +889,14 @@ const FindRide = () => {
 
         {loading ? (
           <div className="rounded-3xl bg-white p-10 text-center text-slate-600 shadow-sm ring-1 ring-slate-200">
-            Loading rides...
+            Searching rides...
           </div>
+        ) : searchError ? (
+          <ErrorState message={searchError} onRetry={handleRetry} />
         ) : rides.length ? (
           <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
             {rides.map((ride) => (
-              <RideCard key={ride._id} ride={ride} />
+              <RideCard key={ride._id} ride={ride} currentUserId={currentUserId} />
             ))}
           </div>
         ) : (
@@ -570,7 +905,9 @@ const FindRide = () => {
             message={
               nearbyMode
                 ? 'No rides found near you. Try increasing distance or changing location.'
-                : 'No rides found for your search. Try nearby locations.'
+                : meaningfulSearchExists
+                  ? 'No rides found for your search. Try broadening filters.'
+                  : 'No rides available right now. Try searching by source and destination.'
             }
           />
         )}

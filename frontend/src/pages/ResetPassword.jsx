@@ -1,8 +1,8 @@
-import React, { useState, useEffect } from 'react';
+import { useState, useEffect } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { Lock, ArrowRight, CheckCircle2 } from 'lucide-react';
 import toast from 'react-hot-toast';
-import { authService } from '../services/api';
+import { authService, getErrorMessage } from '../services/api';
 
 const ResetPassword = () => {
   const navigate = useNavigate();
@@ -23,6 +23,7 @@ const ResetPassword = () => {
 
   const handleSubmit = async (e) => {
     e.preventDefault();
+    if (loading) return;
     if (password !== confirmPassword) {
       return toast.error("Passwords don't match");
     }
@@ -35,7 +36,7 @@ const ResetPassword = () => {
         navigate('/login');
       }, 2000);
     } catch (error) {
-      toast.error(error.response?.data?.message || 'Failed to reset password');
+      toast.error(getErrorMessage(error, 'Failed to reset password'));
     } finally {
       setLoading(false);
     }

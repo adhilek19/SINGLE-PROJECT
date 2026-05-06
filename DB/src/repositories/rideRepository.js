@@ -216,6 +216,25 @@ const buildListMatch = (filters = {}) => {
     }
   }
 
+  if (filters.timeFrom || filters.timeTo) {
+    const timeMatch = {};
+    if (filters.timeFrom) {
+      const fromDate = new Date(filters.timeFrom);
+      if (!Number.isNaN(fromDate.getTime())) {
+        timeMatch.$gte = fromDate;
+      }
+    }
+    if (filters.timeTo) {
+      const toDate = new Date(filters.timeTo);
+      if (!Number.isNaN(toDate.getTime())) {
+        timeMatch.$lte = toDate;
+      }
+    }
+    if (Object.keys(timeMatch).length > 0) {
+      match.departureTime = timeMatch;
+    }
+  }
+
   if (filters.minPrice || filters.maxPrice) {
     match.price = {};
 
@@ -373,6 +392,12 @@ const searchRides = async ({
   sourceText,
   destinationText,
   date,
+  timeFrom,
+  timeTo,
+  vehicleType,
+  minPrice,
+  maxPrice,
+  minSeats,
   page = 1,
   limit = 20,
 } = {}) => {
@@ -381,6 +406,12 @@ const searchRides = async ({
   if (sourceText) filters.sourceText = sourceText;
   if (destinationText) filters.destinationText = destinationText;
   if (date) filters.date = date;
+  if (timeFrom) filters.timeFrom = timeFrom;
+  if (timeTo) filters.timeTo = timeTo;
+  if (vehicleType) filters.vehicleType = vehicleType;
+  if (minPrice) filters.minPrice = minPrice;
+  if (maxPrice) filters.maxPrice = maxPrice;
+  if (minSeats) filters.minSeats = minSeats;
 
   return listPaginated({
     filters,
@@ -628,6 +659,81 @@ export const rideRepository = {
         $pull: {
           passengers: {
             user: userId,
+          },
+        },
+        $inc: {
+          bookedSeats: -seatsToRemove,
+        },
+      },
+      {
+        returnDocument: 'after',
+      }
+    );
+  },
+
+  atomicAttachPassengerFromRequest({
+    rideId,
+    passengerId,
+    seats = 1,
+    pickupLocation = null,
+    pickupConfirmed = false,
+  }) {
+    const requestedSeats = Math.max(1, Number(seats) || 1);
+
+    return Ride.findOneAndUpdate(
+      {
+        _id: rideId,
+        status: 'scheduled',
+        'passengers.user': { $ne: passengerId },
+        $expr: {
+          $gte: [
+            {
+              $subtract: [
+                '$seatsAvailable',
+                { $ifNull: ['$bookedSeats', 0] },
+              ],
+            },
+            requestedSeats,
+          ],
+        },
+      },
+      {
+        $push: {
+          passengers: {
+            user: passengerId,
+            seats: requestedSeats,
+            pickupLocation: pickupLocation || null,
+            pickupConfirmed: Boolean(pickupConfirmed),
+            joinedAt: new Date(),
+          },
+        },
+        $inc: {
+          bookedSeats: requestedSeats,
+        },
+      },
+      {
+        returnDocument: 'after',
+      }
+    );
+  },
+
+  atomicRemovePassenger({
+    rideId,
+    passengerId,
+    seats = 1,
+  }) {
+    const seatsToRemove = Math.max(1, Number(seats) || 1);
+
+    return Ride.findOneAndUpdate(
+      {
+        _id: rideId,
+        'passengers.user': passengerId,
+        bookedSeats: { $gte: seatsToRemove },
+      },
+      {
+        $pull: {
+          passengers: {
+            user: passengerId,
           },
         },
         $inc: {

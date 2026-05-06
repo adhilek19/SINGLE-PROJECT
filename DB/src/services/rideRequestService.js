@@ -69,6 +69,13 @@ export const rideRequestService = {
       throw BadRequest('Ride is not accepting requests');
     }
 
+    const alreadyPassenger = (ride.passengers || []).some(
+      (p) => p.user?.toString() === passengerId.toString()
+    );
+    if (alreadyPassenger) {
+      throw BadRequest('You are already booked on this ride');
+    }
+
     const seatsRequested = Math.max(1, Number(payload.seatsRequested || 1));
     const seatsLeft = Number(ride.seatsAvailable || 0) - Number(ride.bookedSeats || 0);
     if (seatsRequested > seatsLeft) {
@@ -137,34 +144,31 @@ export const rideRequestService = {
       throw BadRequest('Ride is not accepting requests');
     }
 
-    const seatsLeft = Number(ride.seatsAvailable || 0) - Number(ride.bookedSeats || 0);
-    if (seatsLeft < Number(request.seatsRequested || 1)) {
-      throw BadRequest('Not enough seats to accept this request');
+    const pin = generatePin();
+    const updatedRide = await rideRepository.atomicAttachPassengerFromRequest({
+      rideId: ride._id,
+      passengerId: request.passenger,
+      seats: request.seatsRequested,
+      pickupLocation: request.pickupLocation || null,
+      pickupConfirmed: Boolean(request.pickupLocation?.lat && request.pickupLocation?.lng),
+    });
+
+    if (!updatedRide) {
+      const freshRide = await rideRepository.findById(ride._id);
+      const passengerAlreadyBooked = (freshRide?.passengers || []).some(
+        (p) => p.user?.toString() === request.passenger.toString()
+      );
+      if (passengerAlreadyBooked) {
+        throw BadRequest('Passenger is already booked on this ride');
+      }
+      throw BadRequest('Not enough seats or ride no longer accepts requests');
     }
 
-    const pin = generatePin();
     request.status = 'accepted';
     request.acceptedAt = new Date();
     request.startPin = pin;
     request.startPinHash = hashPin(pin);
     request.pinVerified = false;
-
-    const alreadyPassenger = ride.passengers?.some(
-      (p) => p.user?.toString() === request.passenger.toString()
-    );
-
-    if (!alreadyPassenger) {
-      ride.passengers.push({
-        user: request.passenger,
-        seats: Number(request.seatsRequested || 1),
-        pickupConfirmed: Boolean(request.pickupLocation?.lat && request.pickupLocation?.lng),
-        pickupLocation: request.pickupLocation || null,
-        joinedAt: new Date(),
-      });
-      ride.bookedSeats = Number(ride.bookedSeats || 0) + Number(request.seatsRequested || 1);
-    }
-
-    await rideRepository.save(ride);
     await rideRequestRepository.save(request);
 
     const populated = await rideRequestRepository.findById(request._id);
@@ -214,17 +218,11 @@ export const rideRequestService = {
     }
 
     if (request.status === 'accepted') {
-      const idx = (ride.passengers || []).findIndex(
-        (p) => p.user?.toString() === toId(request.passenger)
-      );
-      if (idx !== -1) {
-        ride.passengers.splice(idx, 1);
-        ride.bookedSeats = Math.max(
-          0,
-          Number(ride.bookedSeats || 0) - Number(request.seatsRequested || 1)
-        );
-        await rideRepository.save(ride);
-      }
+      await rideRepository.atomicRemovePassenger({
+        rideId: ride._id,
+        passengerId: request.passenger,
+        seats: request.seatsRequested,
+      });
     }
 
     request.status = 'cancelled';
@@ -294,10 +292,15 @@ export const rideRequestService = {
     request.noShowAt = new Date();
 
     if (isDriver && request.status === 'no_show') {
-      const idx = (ride.passengers || []).findIndex((p) => p.user?.toString() === toId(request.passenger));
-      if (idx !== -1) {
-        ride.passengers.splice(idx, 1);
-        ride.bookedSeats = Math.max(0, Number(ride.bookedSeats || 0) - Number(request.seatsRequested || 1));
+      await rideRepository.atomicRemovePassenger({
+        rideId: ride._id,
+        passengerId: request.passenger,
+        seats: request.seatsRequested,
+      });
+      const freshRide = await rideRepository.findById(ride._id);
+      if (freshRide) {
+        ride.passengers = freshRide.passengers || [];
+        ride.bookedSeats = Number(freshRide.bookedSeats || 0);
       }
     }
 

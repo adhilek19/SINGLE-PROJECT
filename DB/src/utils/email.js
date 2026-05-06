@@ -26,7 +26,7 @@ const configuredSecure = parseBoolean(env.EMAIL_SECURE);
 const emailSecure =
   configuredSecure !== undefined ? configuredSecure : emailPort === 465;
 
-const createTransporter = () =>
+const createSmtpTransporter = () =>
   nodemailer.createTransport({
     host: env.EMAIL_HOST || 'smtp.gmail.com',
     port: emailPort,
@@ -51,7 +51,7 @@ const createTransporter = () =>
     },
   });
 
-const transporter = createTransporter();
+const smtpTransporter = createSmtpTransporter();
 
 const getOtpSubject = (type) =>
   type === 'reset' ? 'Password reset OTP' : 'Email verification OTP';
@@ -77,6 +77,7 @@ const getOtpHtml = (otp, type = 'verify') => {
 };
 
 export const getEmailDebugConfig = () => ({
+  provider: env.EMAIL_PROVIDER || 'smtp',
   host: env.EMAIL_HOST || 'smtp.gmail.com',
   port: emailPort,
   secure: emailSecure,
@@ -85,8 +86,10 @@ export const getEmailDebugConfig = () => ({
 });
 
 export const verifyEmailTransporter = async () => {
+  if ((env.EMAIL_PROVIDER || 'smtp') !== 'smtp') return true;
+
   try {
-    await transporter.verify();
+    await smtpTransporter.verify();
 
     logger.info({
       event: 'email_transporter_verified',
@@ -117,17 +120,75 @@ export const verifyEmailTransporter = async () => {
 
 export const sendOtpEmail = async (to, otp, type = 'verify') => {
   const subject = getOtpSubject(type);
+  const provider = env.EMAIL_PROVIDER || 'smtp';
+  const html = getOtpHtml(otp, type);
 
   try {
-    const info = await transporter.sendMail({
-      from: env.EMAIL_FROM || `SahaYatri <${env.EMAIL_USER}>`,
-      to,
-      subject,
-      html: getOtpHtml(otp, type),
-    });
+    let info;
+    if (provider === 'smtp') {
+      info = await smtpTransporter.sendMail({
+        from: env.EMAIL_FROM || `SahaYatri <${env.EMAIL_USER}>`,
+        to,
+        subject,
+        html,
+      });
+    } else if (provider === 'resend') {
+      if (!env.RESEND_API_KEY) {
+        throw new Error('RESEND_API_KEY is missing');
+      }
+
+      const resp = await fetch('https://api.resend.com/emails', {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${env.RESEND_API_KEY}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          from: env.EMAIL_FROM || 'SahaYatri <onboarding@resend.dev>',
+          to: [to],
+          subject,
+          html,
+        }),
+      });
+
+      const body = await resp.json();
+      if (!resp.ok) {
+        throw new Error(body?.message || `Resend failed with status ${resp.status}`);
+      }
+
+      info = { messageId: body?.id || 'resend-accepted' };
+    } else if (provider === 'sendgrid') {
+      if (!env.SENDGRID_API_KEY) {
+        throw new Error('SENDGRID_API_KEY is missing');
+      }
+
+      const resp = await fetch('https://api.sendgrid.com/v3/mail/send', {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${env.SENDGRID_API_KEY}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          personalizations: [{ to: [{ email: to }] }],
+          from: { email: (env.EMAIL_FROM || '').match(/<(.+)>/)?.[1] || env.EMAIL_USER },
+          subject,
+          content: [{ type: 'text/html', value: html }],
+        }),
+      });
+
+      if (!resp.ok) {
+        const body = await resp.text();
+        throw new Error(`SendGrid failed with status ${resp.status}: ${body}`);
+      }
+
+      info = { messageId: resp.headers.get('x-message-id') || 'sendgrid-accepted' };
+    } else {
+      throw new Error(`Unsupported EMAIL_PROVIDER: ${provider}`);
+    }
 
     logger.info({
       event: 'email_sent',
+      provider,
       to,
       subject,
       messageId: info.messageId,
@@ -142,6 +203,7 @@ export const sendOtpEmail = async (to, otp, type = 'verify') => {
   } catch (error) {
     logger.error({
       event: 'email_failed',
+      provider,
       to,
       subject,
       error: error.message,

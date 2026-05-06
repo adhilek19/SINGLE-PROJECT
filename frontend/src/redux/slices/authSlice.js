@@ -7,9 +7,10 @@ const userFromStorage = userFromStorageRaw ? JSON.parse(userFromStorageRaw) : nu
 const initialState = {
   token: null,
   user: userFromStorage,
-  status: userFromStorage ? 'refreshing' : 'idle',
+  status: 'idle',
   error: null,
-  isHydrated: !userFromStorage,
+  isHydrated: false,
+  isInitializing: true,
 };
 
 
@@ -77,7 +78,10 @@ export const initAuthThunk = createAsyncThunk(
 
       tokenStore.set(token);
 
-      return token;
+      const me = await authService.getProfile();
+      const user = me.data?.data?.user || null;
+
+      return { token, user };
     } catch {
       tokenStore.clear();
       localStorage.removeItem('authUser');
@@ -139,6 +143,8 @@ const authSlice = createSlice({
         token
       );
       state.isHydrated = true;
+      state.isInitializing = false;
+      state.status = 'succeeded';
 
       localStorage.setItem('authUser', JSON.stringify(state.user));
     },
@@ -151,6 +157,7 @@ const authSlice = createSlice({
       state.status = 'idle';
       state.error = null;
       state.isHydrated = true;
+      state.isInitializing = false;
 
       localStorage.removeItem('authUser');
     },
@@ -165,12 +172,16 @@ const authSlice = createSlice({
     builder
       .addCase(initAuthThunk.pending, (state) => {
         state.status = 'refreshing';
+        state.isInitializing = true;
       })
 
       .addCase(initAuthThunk.fulfilled, (state, action) => {
         state.status = 'idle';
-        state.token = action.payload;
+        state.token = action.payload.token;
+        state.user = normalizeUser(action.payload.user, action.payload.token);
         state.isHydrated = true;
+        state.isInitializing = false;
+        localStorage.setItem('authUser', JSON.stringify(state.user));
       })
 
       .addCase(initAuthThunk.rejected, (state) => {
@@ -178,6 +189,7 @@ const authSlice = createSlice({
         state.token = null;
         state.user = null;
         state.isHydrated = true;
+        state.isInitializing = false;
       })
 
       .addCase(loginThunk.pending, (state) => {
@@ -189,6 +201,7 @@ const authSlice = createSlice({
         state.status = 'succeeded';
         state.token = action.payload.token;
         state.isHydrated = true;
+        state.isInitializing = false;
         state.user = normalizeUser(action.payload.user, action.payload.token);
 
         localStorage.setItem('authUser', JSON.stringify(state.user));
@@ -196,6 +209,7 @@ const authSlice = createSlice({
 
       .addCase(loginThunk.rejected, (state, action) => {
         state.status = 'failed';
+        state.isInitializing = false;
         state.error = action.payload || 'Login failed';
       })
 
@@ -205,6 +219,7 @@ const authSlice = createSlice({
         state.token = null;
         state.user = null;
         state.isHydrated = true;
+        state.isInitializing = false;
 
         localStorage.removeItem('authUser');
       });

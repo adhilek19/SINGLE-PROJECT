@@ -1,6 +1,15 @@
 import { rideService } from '../services/rideService.js';
 import { rideMatchingService } from '../services/rideMatchingService.js';
 import { successResponse } from '../utils/apiResponse.js';
+import { BadRequest } from '../utils/AppError.js';
+
+const validateIsoDate = (value, fieldName) => {
+  if (!value) return;
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) {
+    throw BadRequest(`Invalid ${fieldName}`);
+  }
+};
 
 // ─── Create ─────────────────────────────────────────────────────
 
@@ -203,7 +212,18 @@ export const listRides = async (req, res, next) => {
         req.query.destinationText || req.query.destination || req.query.to;
     }
 
-    if (req.query.date) filters.date = req.query.date;
+    if (req.query.date) {
+      validateIsoDate(req.query.date, 'date');
+      filters.date = req.query.date;
+    }
+    if (req.query.timeFrom) {
+      validateIsoDate(req.query.timeFrom, 'timeFrom');
+      filters.timeFrom = req.query.timeFrom;
+    }
+    if (req.query.timeTo) {
+      validateIsoDate(req.query.timeTo, 'timeTo');
+      filters.timeTo = req.query.timeTo;
+    }
     if (req.query.minPrice) filters.minPrice = req.query.minPrice;
     if (req.query.maxPrice) filters.maxPrice = req.query.maxPrice;
     if (req.query.minSeats || req.query.seats) {
@@ -240,10 +260,20 @@ export const searchRides = async (req, res, next) => {
     const page = Math.max(1, parseInt(req.query.page) || 1);
     const limit = Math.min(50, Math.max(1, parseInt(req.query.limit) || 20));
 
+    if (req.query.date) validateIsoDate(req.query.date, 'date');
+    if (req.query.timeFrom) validateIsoDate(req.query.timeFrom, 'timeFrom');
+    if (req.query.timeTo) validateIsoDate(req.query.timeTo, 'timeTo');
+
     const result = await rideService.searchRides({
-      sourceText: req.query.sourceText || req.query.source,
-      destinationText: req.query.destinationText || req.query.destination,
+      sourceText: req.query.sourceText || req.query.source || req.query.from,
+      destinationText: req.query.destinationText || req.query.destination || req.query.to,
       date: req.query.date,
+      timeFrom: req.query.timeFrom,
+      timeTo: req.query.timeTo,
+      vehicleType: req.query.vehicleType,
+      minPrice: req.query.minPrice,
+      maxPrice: req.query.maxPrice,
+      minSeats: req.query.minSeats || req.query.seats,
       page,
       limit,
     });

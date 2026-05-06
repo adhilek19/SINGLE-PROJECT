@@ -23,6 +23,9 @@ const envSchema = joi
     EMAIL_USER: joi.string().required(),
     EMAIL_PASS: joi.string().required(),
     EMAIL_FROM: joi.string().allow('').optional(),
+    EMAIL_PROVIDER: joi.string().valid('smtp', 'resend', 'sendgrid').default('smtp'),
+    RESEND_API_KEY: joi.string().allow('').optional(),
+    SENDGRID_API_KEY: joi.string().allow('').optional(),
     // In development/local, OTP endpoints should not break the whole auth flow
     // when SMTP is blocked by hosting/network. In production keep this false.
     EMAIL_FAIL_OPEN: joi.boolean().truthy('true').falsy('false').optional(),

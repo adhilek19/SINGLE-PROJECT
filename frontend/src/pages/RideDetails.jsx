@@ -17,7 +17,7 @@ import toast from 'react-hot-toast';
 import RouteMap from '../components/RouteMap';
 import { useDispatch, useSelector } from 'react-redux';
 import { fetchRideByIdThunk, cancelRideThunk } from '../redux/slices/rideSlice';
-import { authService, rideService } from '../services/api';
+import { authService, getErrorMessage, rideService } from '../services/api';
 import { connectSocket, getSocket } from '../services/socket';
 import { useLiveLocation } from '../hooks/useLiveLocation';
 
@@ -161,6 +161,7 @@ const RideDetails = () => {
   const ride = useSelector((s) => s.rides.selected);
 
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState('');
   const [actionBusy, setActionBusy] = useState(false);
   const [cancelReason, setCancelReason] = useState('');
   const [startPin, setStartPin] = useState('');
@@ -171,6 +172,12 @@ const RideDetails = () => {
   const [dropLocation, setDropLocation] = useState('');
   const [liveLocationsByUser, setLiveLocationsByUser] = useState({});
   const [reportForm, setReportForm] = useState({ reason: '', description: '' });
+  const [requestActionLoading, setRequestActionLoading] = useState({});
+  const [socketState, setSocketState] = useState('connecting');
+  const [locationWatchState, setLocationWatchState] = useState('idle');
+  const [locationError, setLocationError] = useState('');
+  const [reviewForm, setReviewForm] = useState({ target: '', rating: 5, comment: '' });
+  const [reviewLoading, setReviewLoading] = useState(false);
 
   const uid = toId(user?.id || user?._id);
   const driverId = ride ? toId(ride.driver || ride.driverInfo?._id) : '';
@@ -192,8 +199,39 @@ const RideDetails = () => {
   const acceptedRequests = useMemo(() => (rideRequests || []).filter((r) => r.status === 'accepted'), [rideRequests]);
   const liveLocations = useMemo(() => Object.values(liveLocationsByUser || {}), [liveLocationsByUser]);
   const shareUrl = ride?.shareToken ? `${window.location.origin}/track/${ride.shareToken}` : '';
+  const rideReviews = ride?.reviewDetails || [];
+  const passengerTargets = (ride?.passengers || [])
+    .map((p) => ({
+      id: toId(p.user),
+      name: p.user?.name || 'Passenger',
+    }))
+    .filter((p) => Boolean(p.id));
+
+  const isRideActionClosed = ['completed', 'cancelled'].includes(ride?.status);
+  const isPastScheduled =
+    ride?.status === 'scheduled' &&
+    ride?.departureTime &&
+    new Date(ride.departureTime).getTime() < Date.now();
+  const isRideBookable = ride?.status === 'scheduled' && seatsLeft > 0;
+  const hasPendingRequest = myLatestRequest?.status === 'pending';
+  const hasAcceptedRequest = myLatestRequest?.status === 'accepted' || isPassenger;
+  const canRequestRide = !isDriver && isRideBookable && !myLatestRequest;
+
+  const alreadyReviewedTarget = (targetId) =>
+    rideReviews.some((review) => toId(review.reviewer) === uid && toId(review.reviewee) === String(targetId));
+
+  const passengerReviewableTargets = isDriver
+    ? passengerTargets.filter((p) => !alreadyReviewedTarget(p.id))
+    : [];
+  const canPassengerReviewDriver =
+    !isDriver &&
+    Boolean(isPassenger || hasAcceptedRequest) &&
+    !alreadyReviewedTarget(driverId);
+  const canReview = ride?.status === 'completed' && (canPassengerReviewDriver || passengerReviewableTargets.length > 0);
 
   const refreshRide = async () => dispatch(fetchRideByIdThunk(id)).unwrap();
+  const setReqBusy = (key, busy) =>
+    setRequestActionLoading((prev) => ({ ...prev, [key]: busy }));
 
   const refreshRequests = async () => {
     if (!token) return;
@@ -213,10 +251,12 @@ const RideDetails = () => {
   useEffect(() => {
     const fetchRide = async () => {
       try {
+        setLoadError('');
         await refreshRide();
       } catch (error) {
-        toast.error(typeof error === 'string' ? error : 'Failed to load ride details');
-        navigate('/find-ride');
+        const message = typeof error === 'string' ? error : getErrorMessage(error, 'Failed to load ride details');
+        setLoadError(message);
+        toast.error(message);
       } finally {
         setLoading(false);
       }
@@ -249,19 +289,36 @@ const RideDetails = () => {
     });
   }, [ride?.lastLiveLocations]);
 
-  const canTrackLive = Boolean(token && ride?._id && (isDriver || isPassenger || myLatestRequest?.status === 'accepted'));
+  const canTrackLive = Boolean(
+    token &&
+    ride?._id &&
+    ['started', 'ended'].includes(ride?.status) &&
+    (isDriver || isPassenger || myLatestRequest?.status === 'accepted')
+  );
 
   useEffect(() => {
     if (!token || !ride?._id) return undefined;
     const socket = connectSocket();
+    setSocketState(socket.connected ? 'connected' : 'connecting');
+
+    const onConnect = () => setSocketState('connected');
+    const onDisconnect = () => setSocketState('disconnected');
+    const onConnectError = () => setSocketState('error');
+
     const onBroadcast = (payload) => {
       if (!payload?.userId || String(payload.rideId) !== String(ride._id)) return;
       setLiveLocationsByUser((prev) => ({ ...prev, [payload.userId]: payload }));
     };
+    socket.on('connect', onConnect);
+    socket.on('disconnect', onDisconnect);
+    socket.on('connect_error', onConnectError);
     socket.on('location:broadcast', onBroadcast);
     socket.emit('joinRide', { rideId: ride._id });
     return () => {
       socket.emit('leaveRide', { rideId: ride._id });
+      socket.off('connect', onConnect);
+      socket.off('disconnect', onDisconnect);
+      socket.off('connect_error', onConnectError);
       socket.off('location:broadcast', onBroadcast);
     };
   }, [ride?._id, token]);
@@ -270,7 +327,16 @@ const RideDetails = () => {
     socket: canTrackLive ? getSocket() : null,
     rideId: ride?._id,
     enabled: canTrackLive,
+    onStatusChange: (status) => setLocationWatchState(status),
+    onError: (err) => {
+      if (err?.code === 1) {
+        setLocationError('Location permission denied. Please allow location for live tracking.');
+      } else {
+        setLocationError('Location unavailable right now.');
+      }
+    },
     onPosition: (payload) => {
+      setLocationError('');
       setLiveLocationsByUser((prev) => ({
         ...prev,
         [uid]: {
@@ -303,6 +369,8 @@ const RideDetails = () => {
 
   const handleCreateRequest = async () => {
     if (!token) return navigate('/login');
+    if (requestActionLoading.create) return;
+    setReqBusy('create', true);
     try {
       const payload = {
         seatsRequested: Number(requestSeats || 1),
@@ -311,9 +379,11 @@ const RideDetails = () => {
       };
       await rideService.createRideRequest(id, payload);
       toast.success('Ride request sent');
-      await refreshRequests();
+      await Promise.all([refreshRequests(), refreshRide()]);
     } catch (e) {
-      toast.error(e?.response?.data?.message || 'Failed to create ride request');
+      toast.error(getErrorMessage(e, 'Failed to create ride request'));
+    } finally {
+      setReqBusy('create', false);
     }
   };
 
@@ -329,32 +399,44 @@ const RideDetails = () => {
   };
 
   const handleAcceptRequest = async (requestId) => {
+    if (requestActionLoading[`accept-${requestId}`]) return;
+    setReqBusy(`accept-${requestId}`, true);
     try {
       await rideService.acceptRideRequest(requestId);
       toast.success('Request accepted. Passenger can now see 4-digit PIN.');
       await Promise.all([refreshRequests(), refreshRide()]);
     } catch (e) {
-      toast.error(e?.response?.data?.message || 'Failed to accept request');
+      toast.error(getErrorMessage(e, 'Failed to accept request'));
+    } finally {
+      setReqBusy(`accept-${requestId}`, false);
     }
   };
 
   const handleRejectRequest = async (requestId) => {
+    if (requestActionLoading[`reject-${requestId}`]) return;
+    setReqBusy(`reject-${requestId}`, true);
     try {
       await rideService.rejectRideRequest(requestId);
       toast.success('Request rejected');
-      await refreshRequests();
+      await Promise.all([refreshRequests(), refreshRide()]);
     } catch (e) {
-      toast.error(e?.response?.data?.message || 'Failed to reject request');
+      toast.error(getErrorMessage(e, 'Failed to reject request'));
+    } finally {
+      setReqBusy(`reject-${requestId}`, false);
     }
   };
 
   const handleCancelRequest = async (requestId) => {
+    if (requestActionLoading[`cancel-${requestId}`]) return;
+    setReqBusy(`cancel-${requestId}`, true);
     try {
       await rideService.cancelRideRequest(requestId);
       toast.success('Request cancelled');
       await Promise.all([refreshRequests(), refreshRide()]);
     } catch (e) {
-      toast.error(e?.response?.data?.message || 'Failed to cancel request');
+      toast.error(getErrorMessage(e, 'Failed to cancel request'));
+    } finally {
+      setReqBusy(`cancel-${requestId}`, false);
     }
   };
 
@@ -474,7 +556,73 @@ const RideDetails = () => {
     }
   };
 
-  if (loading) return <div className="p-8 text-center">Loading...</div>;
+  const handleSubmitReview = async () => {
+    if (!canReview) return;
+    const targetId = isDriver ? reviewForm.target : driverId;
+    if (!targetId) {
+      toast.error('Select a passenger to review');
+      return;
+    }
+    if (alreadyReviewedTarget(targetId)) {
+      toast.error('You already reviewed this user for this ride');
+      return;
+    }
+
+    setReviewLoading(true);
+    try {
+      await rideService.reviewRide(id, {
+        revieweeId: targetId,
+        rating: Number(reviewForm.rating),
+        comment: reviewForm.comment,
+      });
+      toast.success('Review submitted');
+      setReviewForm((prev) => ({ ...prev, comment: '', rating: 5, target: '' }));
+      await refreshRide();
+    } catch (e) {
+      toast.error(getErrorMessage(e, 'Failed to submit review'));
+    } finally {
+      setReviewLoading(false);
+    }
+  };
+
+  if (loading) {
+    return (
+      <div className="p-8 text-center">
+        <div className="mx-auto h-8 w-8 animate-spin rounded-full border-4 border-slate-300 border-t-blue-600" />
+        <p className="mt-3 text-sm font-semibold text-slate-600">Loading ride details...</p>
+      </div>
+    );
+  }
+  if (loadError) {
+    return (
+      <div className="p-8">
+        <div className="mx-auto max-w-md rounded-2xl border border-rose-200 bg-rose-50 p-6 text-center">
+          <h3 className="text-lg font-black text-rose-900">Could not load ride</h3>
+          <p className="mt-2 text-sm text-rose-700">{loadError}</p>
+          <div className="mt-4 flex items-center justify-center gap-2">
+            <button
+              type="button"
+              onClick={() => {
+                setLoading(true);
+                setLoadError('');
+                refreshRide().finally(() => setLoading(false));
+              }}
+              className="rounded-xl bg-rose-700 px-4 py-2 text-sm font-bold text-white hover:bg-rose-800"
+            >
+              Retry
+            </button>
+            <button
+              type="button"
+              onClick={() => navigate('/find-ride')}
+              className="rounded-xl bg-slate-900 px-4 py-2 text-sm font-bold text-white"
+            >
+              Back
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
   if (!ride) return null;
 
   const driver = ride.driverInfo || ride.driver || {};
@@ -497,6 +645,11 @@ const RideDetails = () => {
         </div>
 
         <Timeline status={ride.status} />
+        {isPastScheduled ? (
+          <div className="rounded-xl border border-amber-200 bg-amber-50 p-3 text-sm font-semibold text-amber-800">
+            Ride time has passed and is still marked scheduled. Driver action is needed to update status.
+          </div>
+        ) : null}
 
         <div className="grid md:grid-cols-2 gap-6">
           <div className="space-y-3">
@@ -559,6 +712,14 @@ const RideDetails = () => {
               <p className="text-sm font-semibold text-emerald-800">
                 Passenger can see driver live location. Driver can see accepted passenger live location. Speed is shown in km/h.
               </p>
+              <p className="mt-1 text-xs font-semibold text-emerald-700">
+                Socket: {socketState} · Location: {locationWatchState}
+              </p>
+              {locationError ? (
+                <p className="mt-2 rounded-xl bg-amber-100 p-2 text-xs font-bold text-amber-800">
+                  {locationError}
+                </p>
+              ) : null}
             </div>
 
             <div className="grid gap-3 md:grid-cols-2">
@@ -618,7 +779,7 @@ const RideDetails = () => {
                 {myLatestRequest.pickupLocation?.lat ? <p className="text-sm flex items-center gap-1"><MapPin className="w-4 h-4" /> Pickup GPS confirmed</p> : null}
                 <div className="flex flex-wrap gap-2">
                   {['pending', 'accepted'].includes(myLatestRequest.status) && <button onClick={() => handleConfirmPickup(myLatestRequest._id)} className="rounded-xl bg-blue-600 px-4 py-2 font-bold text-white">Confirm pickup with GPS</button>}
-                  {['pending', 'accepted'].includes(myLatestRequest.status) && <button onClick={() => handleCancelRequest(myLatestRequest._id)} disabled={!isScheduled} className="rounded-xl bg-slate-900 px-4 py-2 font-bold text-white disabled:opacity-60">Cancel Request</button>}
+                  {['pending', 'accepted'].includes(myLatestRequest.status) && <button onClick={() => handleCancelRequest(myLatestRequest._id)} disabled={!isScheduled || requestActionLoading[`cancel-${myLatestRequest._id}`]} className="rounded-xl bg-slate-900 px-4 py-2 font-bold text-white disabled:opacity-60">{requestActionLoading[`cancel-${myLatestRequest._id}`] ? 'Cancelling...' : 'Cancel Request'}</button>}
                   {['pending', 'accepted'].includes(myLatestRequest.status) && <button onClick={() => handleMarkNoShow(myLatestRequest._id)} className="rounded-xl bg-amber-600 px-4 py-2 font-bold text-white">Driver no-show</button>}
                 </div>
               </div>
@@ -629,7 +790,11 @@ const RideDetails = () => {
                 <button type="button" onClick={handleUsePickupLocation} className="rounded-xl bg-blue-50 px-4 py-2 font-bold text-blue-700">Use current GPS as pickup</button>
                 {pickupLocation.lat ? <p className="text-xs text-emerald-700">Pickup GPS: {Number(pickupLocation.lat).toFixed(5)}, {Number(pickupLocation.lng).toFixed(5)}</p> : null}
                 <input value={dropLocation} onChange={(e) => setDropLocation(e.target.value)} className="border rounded-xl px-3 py-2 w-full" placeholder="Drop location (optional)" />
-                <button onClick={handleCreateRequest} disabled={!isScheduled || seatsLeft <= 0} className="rounded-xl bg-slate-900 px-4 py-3 font-bold text-white disabled:opacity-60">Request Ride</button>
+                <button onClick={handleCreateRequest} disabled={!canRequestRide || requestActionLoading.create || isPastScheduled} className="rounded-xl bg-slate-900 px-4 py-3 font-bold text-white disabled:opacity-60">
+                  {isDriver ? 'Your ride' : !isRideBookable ? (seatsLeft <= 0 ? 'Full' : 'Unavailable') : requestActionLoading.create ? 'Requesting...' : 'Request Ride'}
+                </button>
+                {hasPendingRequest ? <p className="text-xs font-bold text-blue-700">Requested</p> : null}
+                {hasAcceptedRequest ? <p className="text-xs font-bold text-emerald-700">Booked</p> : null}
               </div>
             )}
           </div>
@@ -650,8 +815,8 @@ const RideDetails = () => {
                 {req.pickupLocation?.lat ? <p className="text-xs text-emerald-700">Pickup GPS confirmed</p> : null}
                 {req.dropLocation?.name ? <p className="text-xs">Drop: {req.dropLocation.name}</p> : null}
                 <div className="flex flex-wrap gap-2">
-                  <button onClick={() => handleAcceptRequest(req._id)} className="rounded-xl bg-emerald-600 px-3 py-2 font-bold text-white">Accept & Generate PIN</button>
-                  <button onClick={() => handleRejectRequest(req._id)} className="rounded-xl bg-rose-600 px-3 py-2 font-bold text-white">Reject</button>
+                  <button onClick={() => handleAcceptRequest(req._id)} disabled={Boolean(requestActionLoading[`accept-${req._id}`] || requestActionLoading[`reject-${req._id}`])} className="rounded-xl bg-emerald-600 px-3 py-2 font-bold text-white disabled:opacity-60">{requestActionLoading[`accept-${req._id}`] ? 'Accepting...' : 'Accept & Generate PIN'}</button>
+                  <button onClick={() => handleRejectRequest(req._id)} disabled={Boolean(requestActionLoading[`accept-${req._id}`] || requestActionLoading[`reject-${req._id}`])} className="rounded-xl bg-rose-600 px-3 py-2 font-bold text-white disabled:opacity-60">{requestActionLoading[`reject-${req._id}`] ? 'Rejecting...' : 'Reject'}</button>
                   <button onClick={() => handleMarkNoShow(req._id)} className="rounded-xl bg-amber-600 px-3 py-2 font-bold text-white">Mark no-show</button>
                 </div>
               </div>
@@ -675,12 +840,77 @@ const RideDetails = () => {
         )}
 
         {token && (
+          <>
+            {ride?.status === 'completed' ? (
+              <div className="border-t pt-5 space-y-3">
+                <h3 className="font-black">Ride Reviews</h3>
+                {canReview ? (
+                  <div className="rounded-2xl border bg-slate-50 p-4 space-y-3 max-w-xl">
+                    {isDriver ? (
+                      <select
+                        value={reviewForm.target}
+                        onChange={(e) => setReviewForm((prev) => ({ ...prev, target: e.target.value }))}
+                        className="w-full rounded-xl border p-3"
+                      >
+                        <option value="">Select passenger to review</option>
+                        {passengerReviewableTargets.map((target) => (
+                          <option key={target.id} value={target.id}>
+                            {target.name}
+                          </option>
+                        ))}
+                      </select>
+                    ) : (
+                      <p className="text-sm font-semibold text-slate-700">
+                        Reviewing driver: {driver?.name || 'Driver'}
+                      </p>
+                    )}
+                    <select
+                      value={reviewForm.rating}
+                      onChange={(e) => setReviewForm((prev) => ({ ...prev, rating: Number(e.target.value) }))}
+                      className="w-full rounded-xl border p-3"
+                    >
+                      <option value={5}>5 - Excellent</option>
+                      <option value={4}>4 - Good</option>
+                      <option value={3}>3 - Average</option>
+                      <option value={2}>2 - Poor</option>
+                      <option value={1}>1 - Bad</option>
+                    </select>
+                    <textarea
+                      value={reviewForm.comment}
+                      onChange={(e) => setReviewForm((prev) => ({ ...prev, comment: e.target.value }))}
+                      className="w-full rounded-xl border p-3"
+                      placeholder="Add optional feedback"
+                    />
+                    <button
+                      type="button"
+                      onClick={handleSubmitReview}
+                      disabled={reviewLoading}
+                      className="rounded-xl bg-emerald-600 px-4 py-3 font-bold text-white disabled:opacity-60"
+                    >
+                      {reviewLoading ? 'Submitting...' : 'Submit Review'}
+                    </button>
+                  </div>
+                ) : (
+                  <p className="text-sm font-semibold text-slate-600">
+                    Review already submitted or you are not eligible to review for this ride.
+                  </p>
+                )}
+              </div>
+            ) : (
+              <div className="border-t pt-5">
+                <p className="text-sm font-semibold text-slate-600">
+                  Reviews unlock after ride completion.
+                </p>
+              </div>
+            )}
+
           <div className="border-t pt-5 space-y-3">
             <h3 className="font-black">Report + Block User</h3>
             <input className="w-full border rounded-xl p-3" placeholder="Reason" value={reportForm.reason} onChange={(e) => setReportForm((p) => ({ ...p, reason: e.target.value }))} />
             <textarea className="w-full border rounded-xl p-3" placeholder="Description" value={reportForm.description} onChange={(e) => setReportForm((p) => ({ ...p, description: e.target.value }))} />
             <button onClick={handleReportAndBlock} className="rounded-xl bg-rose-600 px-4 py-3 font-bold text-white">Submit Report & Block</button>
           </div>
+          </>
         )}
       </div>
     </div>

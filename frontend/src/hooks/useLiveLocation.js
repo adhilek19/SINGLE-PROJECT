@@ -52,6 +52,8 @@ export const useLiveLocation = ({
   rideId,
   enabled = true,
   onPosition,
+  onError,
+  onStatusChange,
 }) => {
   const watchIdRef = useRef(null);
   const previousPositionRef = useRef(null);
@@ -63,6 +65,8 @@ export const useLiveLocation = ({
 
   useEffect(() => {
     if (!enabled || !socket || !rideId || !navigator.geolocation) return undefined;
+
+    if (onStatusChange) onStatusChange('watching');
 
     watchIdRef.current = navigator.geolocation.watchPosition(
       (position) => {
@@ -100,7 +104,10 @@ export const useLiveLocation = ({
         socket.emit('location:update', payload);
         if (onPositionRef.current) onPositionRef.current(payload);
       },
-      () => {},
+      (error) => {
+        if (onError) onError(error);
+        if (onStatusChange) onStatusChange('error');
+      },
       {
         enableHighAccuracy: true,
         maximumAge: 3000,
@@ -113,6 +120,7 @@ export const useLiveLocation = ({
         navigator.geolocation.clearWatch(watchIdRef.current);
         watchIdRef.current = null;
       }
+      if (onStatusChange) onStatusChange('idle');
     };
-  }, [enabled, rideId, socket]);
+  }, [enabled, rideId, socket, onError, onStatusChange]);
 };

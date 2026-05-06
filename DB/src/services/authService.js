@@ -346,9 +346,19 @@ export const authService = {
     return { accessToken };
   },
 
-  async logout(userId, jti) {
+  async logout(userId, jti, refreshToken) {
     if (jti) {
       await cache.setex(`bl:${jti}`, 60 * 60, 1);
+    }
+
+    if (refreshToken) {
+      try {
+        const decodedRefresh = verifyRefreshToken(refreshToken);
+        const ttl = Math.max(1, (decodedRefresh.exp || 0) - Math.floor(Date.now() / 1000));
+        await cache.setex(`rbl:${decodedRefresh.jti}`, ttl, 1);
+      } catch {
+        // Ignore invalid refresh token during logout cleanup.
+      }
     }
 
     logger.info({ event: 'logout', userId });
