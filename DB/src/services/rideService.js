@@ -47,6 +47,19 @@ const ensureFutureDeparture = (dateValue) => {
   return departure;
 };
 
+const ensureRideCanStartNow = (ride) => {
+  const departure = new Date(ride?.departureTime);
+  if (Number.isNaN(departure.getTime())) {
+    throw BadRequest('Ride has an invalid scheduled departure time');
+  }
+
+  if (Date.now() < departure.getTime()) {
+    throw BadRequest(
+      `Ride can be started only at or after scheduled departure time (${departure.toISOString()})`
+    );
+  }
+};
+
 const getPassengerSeatCount = (ride, userId) => {
   const passenger = ride.passengers?.find(
     (p) => p.user?.toString() === userId.toString()
@@ -205,6 +218,8 @@ export const rideService = {
     if (ride.status !== 'scheduled') {
       throw BadRequest(`Cannot start ride in ${ride.status} state`);
     }
+
+    ensureRideCanStartNow(ride);
 
     const acceptedRequests = await rideRequestRepository.findAcceptedByRide(rideId);
 

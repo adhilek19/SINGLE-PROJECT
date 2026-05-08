@@ -13,7 +13,7 @@ const toFiniteCoord = (value) => {
 const toLocationName = (place) => {
   if (typeof place === 'string') return place.trim();
   if (!place || typeof place !== 'object') return '';
-  return String(place.name || place.label || '').trim();
+  return String(place.label || place.name || '').trim();
 };
 
 const hasValidCoords = (place) => {
@@ -31,8 +31,9 @@ const normalizeSelectedLocation = (place) => {
   }
   const lat = toFiniteCoord(place.lat);
   const lng = toFiniteCoord(place.lng);
+  const selectedName = String(place.label || place.name || '').trim();
   return {
-    name: toLocationName(place),
+    name: selectedName,
     lat: lat ?? NaN,
     lng: lng ?? NaN,
   };
@@ -69,7 +70,7 @@ const LocationSearch = ({
   const wrapperRef = useRef(null);
   const inputRef = useRef(null);
   const fieldIsActive = typeof isActive === 'boolean' ? isActive : true;
-  const selectionLocked = hasSelectedLocation && query.trim() === lastSelectedValue;
+  const selectionLocked = hasSelectedLocation;
 
   useEffect(() => {
     const nextValue = (typeof value === 'string' ? value : toLocationName(value)) || defaultValue || '';
@@ -123,7 +124,7 @@ const LocationSearch = ({
         !fieldIsActive ||
         disabled ||
         trimmedQuery.length < MIN_SEARCH_LENGTH ||
-        (hasSelectedLocation && trimmedQuery === lastSelectedValue)
+        hasSelectedLocation
       ) {
         setSuggestions([]);
         setIsOpen(false);
@@ -274,6 +275,9 @@ const LocationSearch = ({
             <button
               type="button"
               key={`${place.lat}-${place.lng}-${place.label}`}
+              onMouseDown={(e) => {
+                e.preventDefault();
+              }}
               onClick={() => handleSelect(place)}
               className="w-full text-left px-4 py-3 hover:bg-slate-50 cursor-pointer text-slate-700 text-sm border-b last:border-0 border-slate-50"
               title={place.label}

@@ -178,6 +178,7 @@ const RideDetails = () => {
   const [locationError, setLocationError] = useState('');
   const [reviewForm, setReviewForm] = useState({ target: '', rating: 5, comment: '' });
   const [reviewLoading, setReviewLoading] = useState(false);
+  const [nowMs, setNowMs] = useState(() => Date.now());
 
   const uid = toId(user?.id || user?._id);
   const driverId = ride ? toId(ride.driver || ride.driverInfo?._id) : '';
@@ -223,14 +224,29 @@ const RideDetails = () => {
   }, [ride?.passengers, rideRequests]);
 
   const isRideActionClosed = ['completed', 'cancelled'].includes(ride?.status);
+  const departureTimeMs = ride?.departureTime
+    ? new Date(ride.departureTime).getTime()
+    : NaN;
+  const hasValidDepartureTime = Number.isFinite(departureTimeMs);
+  const canDriverStartByTime =
+    !hasValidDepartureTime || nowMs >= departureTimeMs;
+  const scheduledStartLabel =
+    ride?.departureTime
+      ? new Date(ride.departureTime).toLocaleTimeString([], {
+          hour: '2-digit',
+          minute: '2-digit',
+        })
+      : '';
   const isPastScheduled =
     ride?.status === 'scheduled' &&
     ride?.departureTime &&
-    new Date(ride.departureTime).getTime() < Date.now();
+    departureTimeMs < nowMs;
   const isRideBookable = ride?.status === 'scheduled' && seatsLeft > 0;
   const hasPendingRequest = myLatestRequest?.status === 'pending';
   const hasAcceptedRequest = myLatestRequest?.status === 'accepted' || isPassenger;
   const canRequestRide = !isDriver && isRideBookable && !myLatestRequest;
+  const startRideDisabled =
+    actionBusy || !canDriverStartByTime || !hasValidDepartureTime;
 
   const alreadyReviewedTarget = (targetId) =>
     rideReviews.some((review) => toId(review.reviewer) === uid && toId(review.reviewee) === String(targetId));
@@ -243,6 +259,14 @@ const RideDetails = () => {
     Boolean(isPassenger || hasAcceptedRequest) &&
     !alreadyReviewedTarget(driverId);
   const canReview = ride?.status === 'completed' && (canPassengerReviewDriver || passengerReviewableTargets.length > 0);
+
+  useEffect(() => {
+    if (!isDriver || !isScheduled) return undefined;
+    const timer = window.setInterval(() => {
+      setNowMs(Date.now());
+    }, 1000);
+    return () => window.clearInterval(timer);
+  }, [isDriver, isScheduled]);
 
   const refreshRide = async () => dispatch(fetchRideByIdThunk(id)).unwrap();
   const setReqBusy = (key, busy) =>
@@ -468,6 +492,14 @@ const RideDetails = () => {
   };
 
   const handleStart = async () => {
+    if (!hasValidDepartureTime) {
+      toast.error('Ride has invalid scheduled departure time.');
+      return;
+    }
+    if (!canDriverStartByTime) {
+      toast.error(`Ride can be started at or after ${scheduledStartLabel}.`);
+      return;
+    }
     if ((ride?.passengers?.length || acceptedRequests.length) && !/^\d{4}$/.test(startPin)) {
       toast.error('Enter passenger 4-digit PIN before starting ride');
       return;
@@ -764,8 +796,13 @@ const RideDetails = () => {
             {isScheduled && (
               <div className="max-w-md rounded-2xl border bg-slate-50 p-4 space-y-3">
                 <p className="text-sm font-semibold">Passenger 4-digit Trip PIN required before ride start.</p>
+                {!canDriverStartByTime ? (
+                  <p className="rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs font-bold text-amber-800">
+                    Start is locked until {scheduledStartLabel}.
+                  </p>
+                ) : null}
                 <input value={startPin} onChange={(e) => setStartPin(e.target.value.replace(/\D/g, '').slice(0, 4))} className="w-full rounded-xl border p-3 text-center text-2xl font-black tracking-[0.5em]" placeholder="4821" />
-                <button onClick={handleStart} disabled={actionBusy} className="w-full rounded-xl bg-emerald-600 px-4 py-3 font-bold text-white disabled:opacity-60">Verify PIN & Start Ride</button>
+                <button onClick={handleStart} disabled={startRideDisabled} className="w-full rounded-xl bg-emerald-600 px-4 py-3 font-bold text-white disabled:opacity-60">Verify PIN & Start Ride</button>
               </div>
             )}
             {isStarted && <button onClick={handleEnd} disabled={actionBusy} className="rounded-xl bg-indigo-600 px-4 py-3 font-bold text-white disabled:opacity-60">End Ride</button>}
