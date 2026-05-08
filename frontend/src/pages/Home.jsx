@@ -18,7 +18,14 @@ const getLocationText = (place) => {
 
 const hasCoords = (place) => {
   if (!place || typeof place !== 'object') return false;
-  return Number.isFinite(Number(place.lat)) && Number.isFinite(Number(place.lng));
+  if (place.lat === '' || place.lat === null || place.lat === undefined) return false;
+  if (place.lng === '' || place.lng === null || place.lng === undefined) return false;
+  if (typeof place.lat === 'string' && !place.lat.trim()) return false;
+  if (typeof place.lng === 'string' && !place.lng.trim()) return false;
+  const lat = Number(place.lat);
+  const lng = Number(place.lng);
+  if (lat === 0 && lng === 0) return false;
+  return Number.isFinite(lat) && Number.isFinite(lng) && lat >= -90 && lat <= 90 && lng >= -180 && lng <= 180;
 };
 
 const Home = () => {

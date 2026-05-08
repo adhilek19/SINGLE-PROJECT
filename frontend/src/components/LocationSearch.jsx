@@ -3,6 +3,13 @@ import { MapPin, Loader2 } from 'lucide-react';
 import { fetchGeoapifyLocations } from '../services/locationAutocomplete';
 
 const MIN_SEARCH_LENGTH = 2;
+const toFiniteCoord = (value) => {
+  if (value === '' || value === null || value === undefined) return null;
+  if (typeof value === 'string' && !value.trim()) return null;
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : null;
+};
+
 const toLocationName = (place) => {
   if (typeof place === 'string') return place.trim();
   if (!place || typeof place !== 'object') return '';
@@ -11,17 +18,23 @@ const toLocationName = (place) => {
 
 const hasValidCoords = (place) => {
   if (!place || typeof place !== 'object') return false;
-  return Number.isFinite(Number(place.lat)) && Number.isFinite(Number(place.lng));
+  const lat = toFiniteCoord(place.lat);
+  const lng = toFiniteCoord(place.lng);
+  if (lat === null || lng === null) return false;
+  if (lat === 0 && lng === 0) return false;
+  return lat >= -90 && lat <= 90 && lng >= -180 && lng <= 180;
 };
 
 const normalizeSelectedLocation = (place) => {
   if (!place || typeof place !== 'object') {
     return { name: '', lat: NaN, lng: NaN };
   }
+  const lat = toFiniteCoord(place.lat);
+  const lng = toFiniteCoord(place.lng);
   return {
     name: toLocationName(place),
-    lat: Number(place.lat),
-    lng: Number(place.lng),
+    lat: lat ?? NaN,
+    lng: lng ?? NaN,
   };
 };
 

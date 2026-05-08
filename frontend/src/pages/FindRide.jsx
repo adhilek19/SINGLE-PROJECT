@@ -106,6 +106,13 @@ const parseNumberIfValid = (value) => {
   return Number.isFinite(parsed) ? parsed : undefined;
 };
 
+const parseCoordIfValid = (value) => {
+  if (value === '' || value === null || value === undefined) return null;
+  if (typeof value === 'string' && !value.trim()) return null;
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : null;
+};
+
 const getSearchText = (place) => {
   if (!place) return '';
   if (typeof place === 'string') return place;
@@ -114,17 +121,19 @@ const getSearchText = (place) => {
 
 const hasLocationCoords = (place) => {
   if (!place || typeof place !== 'object') return false;
-  const lat = Number(place.lat);
-  const lng = Number(place.lng);
-  return Number.isFinite(lat) && Number.isFinite(lng);
+  const lat = parseCoordIfValid(place.lat);
+  const lng = parseCoordIfValid(place.lng);
+  if (lat === null || lng === null) return false;
+  if (lat === 0 && lng === 0) return false;
+  return lat >= -90 && lat <= 90 && lng >= -180 && lng <= 180;
 };
 
 const getLocationFromParams = (name, lat, lng) => {
   const trimmedName = String(name || '').trim();
-  const parsedLat = Number(lat);
-  const parsedLng = Number(lng);
+  const parsedLat = parseCoordIfValid(lat);
+  const parsedLng = parseCoordIfValid(lng);
   if (!trimmedName) return null;
-  if (Number.isFinite(parsedLat) && Number.isFinite(parsedLng)) {
+  if (parsedLat !== null && parsedLng !== null) {
     return { name: trimmedName, label: trimmedName, lat: parsedLat, lng: parsedLng };
   }
   return { name: trimmedName };

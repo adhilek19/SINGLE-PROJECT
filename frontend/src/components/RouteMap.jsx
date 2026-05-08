@@ -11,18 +11,103 @@ import {
 } from 'react-leaflet';
 import { MapPin, Navigation, Route } from 'lucide-react';
 
-const isValidLocation = (location) => {
-  const lat = Number(location?.lat);
-  const lng = Number(location?.lng);
+const ROUTE_DEBUG_ENABLED =
+  import.meta.env.DEV || import.meta.env.VITE_DEBUG_ROUTE_MAP === 'true';
 
-  return (
-    Number.isFinite(lat) &&
-    Number.isFinite(lng) &&
-    lat >= -90 &&
-    lat <= 90 &&
-    lng >= -180 &&
-    lng <= 180
-  );
+const logRouteDebug = (...args) => {
+  if (ROUTE_DEBUG_ENABLED) {
+    // eslint-disable-next-line no-console
+    console.log('[RouteMap]', ...args);
+  }
+};
+
+const toFiniteCoord = (value) => {
+  if (value === '' || value === null || value === undefined) return null;
+  if (typeof value === 'string' && !value.trim()) return null;
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : null;
+};
+
+const normalizeLocation = (location) => {
+  if (!location || typeof location !== 'object') return null;
+
+  const lat = toFiniteCoord(location.lat);
+  const lng = toFiniteCoord(location.lng);
+  if (lat === null || lng === null) return null;
+  if (lat === 0 && lng === 0) return null;
+
+  if (lat < -90 || lat > 90 || lng < -180 || lng > 180) return null;
+
+  return {
+    ...location,
+    lat,
+    lng,
+    name: String(location.name || location.label || '').trim(),
+  };
+};
+
+const isValidLocation = (location) => Boolean(normalizeLocation(location));
+
+const toLeafletPoint = (location) => {
+  const normalized = normalizeLocation(location);
+  if (!normalized) return null;
+  return [normalized.lat, normalized.lng];
+};
+
+const geojsonToLeafletPoints = (coordinates = []) =>
+  coordinates
+    .map((pair) => {
+      if (!Array.isArray(pair) || pair.length < 2) return null;
+      const lng = toFiniteCoord(pair[0]);
+      const lat = toFiniteCoord(pair[1]);
+      if (lat === null || lng === null) return null;
+      return [lat, lng];
+    })
+    .filter(Boolean);
+
+const buildOsrmRouteUrl = ({ srcLng, srcLat, destLng, destLat }) =>
+  `https://router.project-osrm.org/route/v1/driving/${srcLng},${srcLat};${destLng},${destLat}?overview=full&geometries=geojson&steps=false`;
+
+const buildOsrmNearestUrl = ({ lng, lat }) =>
+  `https://router.project-osrm.org/nearest/v1/driving/${lng},${lat}?number=1`;
+
+const parseOsrmRoutePayload = (payload) => {
+  const route = payload?.routes?.[0];
+  const coords = geojsonToLeafletPoints(route?.geometry?.coordinates || []);
+  if (!route || !coords.length) return null;
+  return {
+    coords,
+    distanceKm: Number.isFinite(Number(route.distance))
+      ? (Number(route.distance) / 1000).toFixed(1)
+      : null,
+    durationSec: Number.isFinite(Number(route.duration))
+      ? Number(route.duration)
+      : null,
+  };
+};
+
+const parseOsrmNearestPayload = (payload) => {
+  const snapped = payload?.waypoints?.[0]?.location;
+  if (!Array.isArray(snapped) || snapped.length < 2) return null;
+  const lng = toFiniteCoord(snapped[0]);
+  const lat = toFiniteCoord(snapped[1]);
+  if (lat === null || lng === null) return null;
+  return { lat, lng };
+};
+
+const fetchJsonWithDebug = async (url, { signal, context }) => {
+  const res = await fetch(url, { signal });
+  const payload = await res.json();
+  logRouteDebug(`${context} response`, {
+    status: res.status,
+    ok: res.ok,
+    url,
+    payload,
+  });
+  if (!res.ok) {
+    throw new Error(payload?.message || `${context} failed with status ${res.status}`);
+  }
+  return payload;
 };
 
 const FitBounds = ({ source, destination, liveLocations = [] }) => {
@@ -31,11 +116,14 @@ const FitBounds = ({ source, destination, liveLocations = [] }) => {
   useEffect(() => {
     const points = [];
 
-    if (isValidLocation(source)) points.push([Number(source.lat), Number(source.lng)]);
-    if (isValidLocation(destination)) points.push([Number(destination.lat), Number(destination.lng)]);
+    const sourcePoint = toLeafletPoint(source);
+    const destinationPoint = toLeafletPoint(destination);
+    if (sourcePoint) points.push(sourcePoint);
+    if (destinationPoint) points.push(destinationPoint);
 
     liveLocations.filter(isValidLocation).forEach((loc) => {
-      points.push([Number(loc.lat), Number(loc.lng)]);
+      const point = toLeafletPoint(loc);
+      if (point) points.push(point);
     });
 
     if (points.length < 2) return;
@@ -44,45 +132,6 @@ const FitBounds = ({ source, destination, liveLocations = [] }) => {
   }, [map, source, destination, liveLocations]);
 
   return null;
-};
-
-const decodePolyline = (encoded) => {
-  let index = 0;
-  const len = encoded.length;
-  let lat = 0;
-  let lng = 0;
-  const coordinates = [];
-
-  while (index < len) {
-    let b;
-    let shift = 0;
-    let result = 0;
-
-    do {
-      b = encoded.charCodeAt(index++) - 63;
-      result |= (b & 0x1f) << shift;
-      shift += 5;
-    } while (b >= 0x20);
-
-    const deltaLat = result & 1 ? ~(result >> 1) : result >> 1;
-    lat += deltaLat;
-
-    shift = 0;
-    result = 0;
-
-    do {
-      b = encoded.charCodeAt(index++) - 63;
-      result |= (b & 0x1f) << shift;
-      shift += 5;
-    } while (b >= 0x20);
-
-    const deltaLng = result & 1 ? ~(result >> 1) : result >> 1;
-    lng += deltaLng;
-
-    coordinates.push([lat / 1e5, lng / 1e5]);
-  }
-
-  return coordinates;
 };
 
 const formatDuration = (seconds) => {
@@ -225,16 +274,21 @@ const RouteMap = ({ source, destination, liveLocations = [], height = '360px' })
   const liveLocationMapRef = useRef(new Map());
   const liveAnimationFrameRef = useRef(new Map());
 
-  const isValid = isValidLocation(source) && isValidLocation(destination);
+  const normalizedSource = useMemo(() => normalizeLocation(source), [source]);
+  const normalizedDestination = useMemo(
+    () => normalizeLocation(destination),
+    [destination]
+  );
+  const isValid = Boolean(normalizedSource && normalizedDestination);
 
   const center = useMemo(() => {
     if (!isValid) return [10.8505, 76.2711];
 
     return [
-      (Number(source.lat) + Number(destination.lat)) / 2,
-      (Number(source.lng) + Number(destination.lng)) / 2,
+      (normalizedSource.lat + normalizedDestination.lat) / 2,
+      (normalizedSource.lng + normalizedDestination.lng) / 2,
     ];
-  }, [isValid, source, destination]);
+  }, [isValid, normalizedSource, normalizedDestination]);
 
   useEffect(
     () => () => {
@@ -335,7 +389,8 @@ const RouteMap = ({ source, destination, liveLocations = [], height = '360px' })
   );
 
   useEffect(() => {
-    if (!isValid || !isValidLocation(driverLiveLocation)) {
+    const normalizedDriverLocation = normalizeLocation(driverLiveLocation);
+    if (!isValid || !normalizedDriverLocation || !normalizedDestination) {
       setLiveRouteCoords([]);
       setLiveDistanceKm(null);
       setLiveEtaText('');
@@ -346,17 +401,19 @@ const RouteMap = ({ source, destination, liveLocations = [], height = '360px' })
     const controller = new AbortController();
     const timer = window.setTimeout(async () => {
       try {
-        const srcLng = Number(driverLiveLocation.lng);
-        const srcLat = Number(driverLiveLocation.lat);
-        const destLng = Number(destination.lng);
-        const destLat = Number(destination.lat);
+        const url = buildOsrmRouteUrl({
+          srcLng: normalizedDriverLocation.lng,
+          srcLat: normalizedDriverLocation.lat,
+          destLng: normalizedDestination.lng,
+          destLat: normalizedDestination.lat,
+        });
+        const payload = await fetchJsonWithDebug(url, {
+          signal: controller.signal,
+          context: 'OSRM live route',
+        });
+        const parsedRoute = parseOsrmRoutePayload(payload);
 
-        const url = `https://router.project-osrm.org/route/v1/driving/${srcLng},${srcLat};${destLng},${destLat}?overview=full&geometries=polyline`;
-        const res = await fetch(url, { signal: controller.signal });
-        const data = await res.json();
-        const route = data?.routes?.[0];
-
-        if (!route) {
+        if (!parsedRoute) {
           setLiveRouteCoords([]);
           setLiveDistanceKm(null);
           setLiveEtaText('');
@@ -364,9 +421,9 @@ const RouteMap = ({ source, destination, liveLocations = [], height = '360px' })
           return;
         }
 
-        setLiveRouteCoords(decodePolyline(route.geometry));
-        setLiveDistanceKm((route.distance / 1000).toFixed(1));
-        setLiveEtaText(formatDuration(route.duration));
+        setLiveRouteCoords(parsedRoute.coords);
+        setLiveDistanceKm(parsedRoute.distanceKm);
+        setLiveEtaText(formatDuration(parsedRoute.durationSec));
         setLiveRouteError('');
       } catch {
         setLiveRouteCoords([]);
@@ -380,56 +437,132 @@ const RouteMap = ({ source, destination, liveLocations = [], height = '360px' })
       controller.abort();
       window.clearTimeout(timer);
     };
-  }, [driverLiveLocation, destination, isValid]);
+  }, [driverLiveLocation, normalizedDestination, isValid]);
 
   useEffect(() => {
+    const controller = new AbortController();
+
     const fetchRoute = async () => {
-      if (!isValid) return;
+      if (!isValid || !normalizedSource || !normalizedDestination) return;
 
       try {
         setLoading(true);
         setRouteError('');
 
-        const srcLng = Number(source.lng);
-        const srcLat = Number(source.lat);
-        const destLng = Number(destination.lng);
-        const destLat = Number(destination.lat);
+        logRouteDebug('Route input source object', source);
+        logRouteDebug('Route input destination object', destination);
+        logRouteDebug('Route parsed coordinates', {
+          source: {
+            name: normalizedSource.name,
+            lat: normalizedSource.lat,
+            lng: normalizedSource.lng,
+          },
+          destination: {
+            name: normalizedDestination.name,
+            lat: normalizedDestination.lat,
+            lng: normalizedDestination.lng,
+          },
+        });
 
-        const url = `https://router.project-osrm.org/route/v1/driving/${srcLng},${srcLat};${destLng},${destLat}?overview=full&geometries=polyline`;
+        let parsedRoute = null;
 
-        const res = await fetch(url);
-        const data = await res.json();
+        const directRouteUrl = buildOsrmRouteUrl({
+          srcLng: normalizedSource.lng,
+          srcLat: normalizedSource.lat,
+          destLng: normalizedDestination.lng,
+          destLat: normalizedDestination.lat,
+        });
+        const directPayload = await fetchJsonWithDebug(directRouteUrl, {
+          signal: controller.signal,
+          context: 'OSRM direct route',
+        });
+        parsedRoute = parseOsrmRoutePayload(directPayload);
 
-        const route = data?.routes?.[0];
+        if (!parsedRoute) {
+          const [snappedSourcePayload, snappedDestinationPayload] =
+            await Promise.all([
+              fetchJsonWithDebug(
+                buildOsrmNearestUrl({
+                  lng: normalizedSource.lng,
+                  lat: normalizedSource.lat,
+                }),
+                { signal: controller.signal, context: 'OSRM source nearest' }
+              ),
+              fetchJsonWithDebug(
+                buildOsrmNearestUrl({
+                  lng: normalizedDestination.lng,
+                  lat: normalizedDestination.lat,
+                }),
+                {
+                  signal: controller.signal,
+                  context: 'OSRM destination nearest',
+                }
+              ),
+            ]);
 
-        if (!route) {
+          const snappedSource = parseOsrmNearestPayload(snappedSourcePayload);
+          const snappedDestination = parseOsrmNearestPayload(
+            snappedDestinationPayload
+          );
+
+          logRouteDebug('Snapped coordinates', {
+            snappedSource,
+            snappedDestination,
+          });
+
+          if (snappedSource && snappedDestination) {
+            const snappedRouteUrl = buildOsrmRouteUrl({
+              srcLng: snappedSource.lng,
+              srcLat: snappedSource.lat,
+              destLng: snappedDestination.lng,
+              destLat: snappedDestination.lat,
+            });
+            const snappedPayload = await fetchJsonWithDebug(snappedRouteUrl, {
+              signal: controller.signal,
+              context: 'OSRM snapped route',
+            });
+            parsedRoute = parseOsrmRoutePayload(snappedPayload);
+          }
+        }
+
+        if (!parsedRoute) {
           setRouteCoords([
-            [srcLat, srcLng],
-            [destLat, destLng],
+            [normalizedSource.lat, normalizedSource.lng],
+            [normalizedDestination.lat, normalizedDestination.lng],
           ]);
           setDistanceKm(null);
           setDurationText('');
-          setRouteError('Route provider returned no path. Showing straight line.');
+          setRouteError(
+            'Route provider returned no path. Showing straight line.'
+          );
           return;
         }
 
-        setRouteCoords(decodePolyline(route.geometry));
-        setDistanceKm((route.distance / 1000).toFixed(1));
-        setDurationText(formatDuration(route.duration));
+        setRouteCoords(parsedRoute.coords);
+        setDistanceKm(parsedRoute.distanceKm);
+        setDurationText(formatDuration(parsedRoute.durationSec));
         setRouteError('');
-      } catch {
+      } catch (error) {
+        if (error?.name === 'AbortError') return;
+        logRouteDebug('Route fetch failed', {
+          message: error?.message || 'Unknown error',
+        });
         setRouteCoords([
-          [Number(source.lat), Number(source.lng)],
-          [Number(destination.lat), Number(destination.lng)],
+          [normalizedSource.lat, normalizedSource.lng],
+          [normalizedDestination.lat, normalizedDestination.lng],
         ]);
+        setDistanceKm(null);
+        setDurationText('');
         setRouteError('Unable to load route details. Showing straight line.');
       } finally {
         setLoading(false);
       }
     };
 
-    fetchRoute();
-  }, [isValid, source, destination]);
+    void fetchRoute();
+
+    return () => controller.abort();
+  }, [isValid, normalizedSource, normalizedDestination, source, destination]);
 
   if (!isValid) {
     return (
@@ -498,7 +631,7 @@ const RouteMap = ({ source, destination, liveLocations = [], height = '360px' })
           />
 
           <CircleMarker
-            center={[Number(source.lat), Number(source.lng)]}
+            center={[normalizedSource.lat, normalizedSource.lng]}
             radius={9}
             pathOptions={{
               color: '#2563eb',
@@ -509,12 +642,12 @@ const RouteMap = ({ source, destination, liveLocations = [], height = '360px' })
             <Popup>
               <strong>Source</strong>
               <br />
-              {source.name}
+              {normalizedSource.name || 'Source'}
             </Popup>
           </CircleMarker>
 
           <CircleMarker
-            center={[Number(destination.lat), Number(destination.lng)]}
+            center={[normalizedDestination.lat, normalizedDestination.lng]}
             radius={9}
             pathOptions={{
               color: '#dc2626',
@@ -525,7 +658,7 @@ const RouteMap = ({ source, destination, liveLocations = [], height = '360px' })
             <Popup>
               <strong>Destination</strong>
               <br />
-              {destination.name}
+              {normalizedDestination.name || 'Destination'}
             </Popup>
           </CircleMarker>
 
@@ -564,7 +697,7 @@ const RouteMap = ({ source, destination, liveLocations = [], height = '360px' })
           <div className="min-w-0">
             <p className="text-xs font-bold text-slate-500">From</p>
             <p className="text-sm font-semibold text-slate-800 truncate">
-              {source.name}
+              {normalizedSource.name || 'Source'}
             </p>
           </div>
         </div>
@@ -574,7 +707,7 @@ const RouteMap = ({ source, destination, liveLocations = [], height = '360px' })
           <div className="min-w-0">
             <p className="text-xs font-bold text-slate-500">To</p>
             <p className="text-sm font-semibold text-slate-800 truncate">
-              {destination.name}
+              {normalizedDestination.name || 'Destination'}
             </p>
           </div>
         </div>

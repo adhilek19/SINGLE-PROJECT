@@ -42,6 +42,7 @@ const normalizeFeature = (feature) => {
   const lng = Number(props.lon);
 
   if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null;
+  if (lat < -90 || lat > 90 || lng < -180 || lng > 180) return null;
 
   const name =
     props.name ||
