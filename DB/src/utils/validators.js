@@ -154,12 +154,6 @@ export const updateProfileSchema = Joi.object({
     phone: Joi.string().trim().allow('').optional(),
     relationship: Joi.string().trim().allow('').optional(),
   }).optional(),
-  verification: Joi.object({
-    phone: Joi.boolean().optional(),
-    id: Joi.boolean().optional(),
-    profilePhoto: Joi.boolean().optional(),
-    vehicle: Joi.boolean().optional(),
-  }).optional(),
   safetyPreferences: Joi.object({
     womenOnlyRides: Joi.boolean().optional(),
     verifiedOnlyRides: Joi.boolean().optional(),

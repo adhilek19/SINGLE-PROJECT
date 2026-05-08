@@ -1,4 +1,4 @@
-import React, { useState, useRef } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { 
   MapPin, Calendar, Clock, Users, IndianRupee, 
@@ -9,42 +9,107 @@ import { useDispatch } from 'react-redux';
 import { createRideThunk } from '../redux/slices/rideSlice';
 import LocationSearch from '../components/LocationSearch';
 
+
+const POST_RIDE_DRAFT_KEY = 'sahayatri_post_ride_draft_v1';
+
+const DEFAULT_POST_RIDE_FORM = {
+  source: { name: '', lat: 0, lng: 0 },
+  destination: { name: '', lat: 0, lng: 0 },
+  date: '',
+  time: '',
+  duration: 60,
+  seatsAvailable: 3,
+  price: 0,
+  description: '',
+  vehicle: {
+    type: 'car',
+    brand: '',
+    model: '',
+    number: '',
+  },
+  preferences: {
+    womenOnly: false,
+    verifiedOnly: false,
+    hidePhoneNumber: false,
+    requireRideShare: false,
+    smokingAllowed: false,
+    musicAllowed: true,
+    petsAllowed: false,
+    luggageSpace: true,
+    acAvailable: false,
+    conversationLevel: 'normal',
+    genderPreference: 'any',
+  },
+  vehicleImage: null,
+};
+
+const normalizeDraftLocation = (place) => {
+  if (!place) return { name: '', lat: 0, lng: 0 };
+
+  if (typeof place === 'string') {
+    return { name: place, lat: 0, lng: 0 };
+  }
+
+  return {
+    name: place.name || place.label || '',
+    lat: Number(place.lat) || 0,
+    lng: Number(place.lng) || 0,
+  };
+};
+
+const normalizePostRideDraft = (draft = {}) => ({
+  ...DEFAULT_POST_RIDE_FORM,
+  ...draft,
+  source: normalizeDraftLocation(draft.source),
+  destination: normalizeDraftLocation(draft.destination),
+  vehicle: {
+    ...DEFAULT_POST_RIDE_FORM.vehicle,
+    ...(draft.vehicle || {}),
+  },
+  preferences: {
+    ...DEFAULT_POST_RIDE_FORM.preferences,
+    ...(draft.preferences || {}),
+  },
+  vehicleImage: null,
+});
+
+const getInitialPostRideForm = () => {
+  try {
+    const saved = localStorage.getItem(POST_RIDE_DRAFT_KEY);
+    if (!saved) return DEFAULT_POST_RIDE_FORM;
+    return normalizePostRideDraft(JSON.parse(saved));
+  } catch {
+    return DEFAULT_POST_RIDE_FORM;
+  }
+};
+
+const getPostRideDraftPayload = (formData) => ({
+  ...formData,
+  vehicleImage: null,
+});
+
 const PostRide = () => {
   const navigate = useNavigate();
   const dispatch = useDispatch();
   const fileInputRef = useRef(null);
   const [loading, setLoading] = useState(false);
   const [imagePreview, setImagePreview] = useState(null);
-  const [formData, setFormData] = useState({
-    source: { name: '', lat: 0, lng: 0 },
-    destination: { name: '', lat: 0, lng: 0 },
-    date: '',
-    time: '',
-    duration: 60, // Default 60 mins
-    seatsAvailable: 3,
-    price: 0,
-    description: '',
-    vehicle: {
-      type: 'car',
-      brand: '',
-      model: '',
-      number: ''
-    },
-    preferences: {
-      womenOnly: false,
-      verifiedOnly: false,
-      hidePhoneNumber: false,
-      requireRideShare: false,
-      smokingAllowed: false,
-      musicAllowed: true,
-      petsAllowed: false,
-      luggageSpace: true,
-      acAvailable: false,
-      conversationLevel: 'normal',
-      genderPreference: 'any',
-    },
-    vehicleImage: null
-  });
+  const [formData, setFormData] = useState(getInitialPostRideForm);
+
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      try {
+        localStorage.setItem(
+          POST_RIDE_DRAFT_KEY,
+          JSON.stringify(getPostRideDraftPayload(formData))
+        );
+      } catch {
+        // Ignore localStorage quota/private-mode errors. Draft saving is best-effort.
+      }
+    }, 250);
+
+    return () => clearTimeout(timer);
+  }, [formData]);
 
   const handleChange = (e) => {
     const { name, value } = e.target;
@@ -82,26 +147,26 @@ const PostRide = () => {
     }
   };
 
-  const handleSelectSource = (place) => {
+  const handleSourceChange = (place) => {
     setFormData(prev => ({
       ...prev,
-      source: {
-        name: place.name,
-        lat: Number(place.lat),
-        lng: Number(place.lng)
-      }
+      source: normalizeDraftLocation(place),
     }));
   };
 
-  const handleSelectDestination = (place) => {
+  const handleDestinationChange = (place) => {
     setFormData(prev => ({
       ...prev,
-      destination: {
-        name: place.name,
-        lat: Number(place.lat),
-        lng: Number(place.lng)
-      }
+      destination: normalizeDraftLocation(place),
     }));
+  };
+
+  const handleSelectSource = (place) => {
+    handleSourceChange(place);
+  };
+
+  const handleSelectDestination = (place) => {
+    handleDestinationChange(place);
   };
 
   const handleSubmit = async (e) => {
@@ -136,6 +201,7 @@ const PostRide = () => {
       
       const resultAction = await dispatch(createRideThunk(data));
       if (createRideThunk.fulfilled.match(resultAction)) {
+        localStorage.removeItem(POST_RIDE_DRAFT_KEY);
         toast.success('Ride posted successfully!');
         navigate(`/ride/${resultAction.payload._id}`);
       } else {
@@ -175,6 +241,8 @@ const PostRide = () => {
                   <LocationSearch 
                     placeholder="Source (Leaving from)" 
                     iconColor="text-blue-500"
+                    value={formData.source}
+                    onChange={handleSourceChange}
                     onSelect={handleSelectSource}
                   />
                 </div>
@@ -183,6 +251,8 @@ const PostRide = () => {
                   <LocationSearch 
                     placeholder="Destination (Going to)" 
                     iconColor="text-emerald-500"
+                    value={formData.destination}
+                    onChange={handleDestinationChange}
                     onSelect={handleSelectDestination}
                   />
                 </div>

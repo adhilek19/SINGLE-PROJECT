@@ -411,9 +411,18 @@ export const rideService = {
 
     const isDriver = ride.driver.toString() === reviewerId.toString();
 
-    const isPassenger = ride.passengers?.some(
+    let isPassenger = ride.passengers?.some(
       (p) => p.user?.toString() === reviewerId.toString()
     );
+
+    if (!isDriver && !isPassenger) {
+      const acceptedOrCompletedRequest =
+        await rideRequestRepository.findAcceptedOrCompletedByRideAndPassenger({
+          rideId,
+          passengerId: reviewerId,
+        });
+      isPassenger = Boolean(acceptedOrCompletedRequest);
+    }
 
     if (!isDriver && !isPassenger) {
       throw Forbidden('Only ride participants can review this ride');
@@ -431,9 +440,18 @@ export const rideService = {
 
     const targetIsDriver = ride.driver.toString() === targetId.toString();
 
-    const targetIsPassenger = ride.passengers?.some(
+    let targetIsPassenger = ride.passengers?.some(
       (p) => p.user?.toString() === targetId.toString()
     );
+
+    if (!targetIsDriver && !targetIsPassenger) {
+      const targetAcceptedOrCompletedRequest =
+        await rideRequestRepository.findAcceptedOrCompletedByRideAndPassenger({
+          rideId,
+          passengerId: targetId,
+        });
+      targetIsPassenger = Boolean(targetAcceptedOrCompletedRequest);
+    }
 
     if (!targetIsDriver && !targetIsPassenger) {
       throw BadRequest('The user you are trying to review was not part of this ride');
@@ -574,6 +592,12 @@ export const rideService = {
     minPrice,
     maxPrice,
     minSeats,
+    fromLat,
+    fromLng,
+    toLat,
+    toLng,
+    sourceRadiusKm,
+    destinationRadiusKm,
     page = 1,
     limit = 20,
   } = {}) {
@@ -587,6 +611,12 @@ export const rideService = {
       minPrice,
       maxPrice,
       minSeats,
+      fromLat,
+      fromLng,
+      toLat,
+      toLng,
+      sourceRadiusKm,
+      destinationRadiusKm,
       page,
       limit,
     });

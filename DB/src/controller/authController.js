@@ -224,7 +224,6 @@ export const updateProfile = async (req, res, next) => {
       'profilePic',
       'vehicle',
       'trustedContact',
-      'verification',
       'safetyPreferences',
       'currentLocation',
     ];

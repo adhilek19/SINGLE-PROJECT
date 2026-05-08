@@ -2,6 +2,8 @@ import React, { useState, useEffect, useRef } from 'react';
 import { MapPin, Loader2 } from 'lucide-react';
 import { fetchGeoapifyLocations } from '../services/locationAutocomplete';
 
+const MIN_SEARCH_LENGTH = 2;
+
 const LocationSearch = ({
   label,
   placeholder,
@@ -28,9 +30,11 @@ const LocationSearch = ({
   const [noResults, setNoResults] = useState(false);
   const [hasSelectedLocation, setHasSelectedLocation] = useState(false);
   const [lastSelectedValue, setLastSelectedValue] = useState('');
+  const [isFocused, setIsFocused] = useState(false);
   const wrapperRef = useRef(null);
   const inputRef = useRef(null);
   const fieldIsActive = typeof isActive === 'boolean' ? isActive : true;
+  const selectionLocked = hasSelectedLocation && query.trim() === lastSelectedValue;
 
   useEffect(() => {
     const nextValue =
@@ -65,6 +69,7 @@ const LocationSearch = ({
   useEffect(() => {
     const closeDropdown = (event) => {
       if (wrapperRef.current && !wrapperRef.current.contains(event.target)) {
+        setIsFocused(false);
         setIsOpen(false);
         setSuggestions([]);
         onCloseAll?.();
@@ -84,7 +89,7 @@ const LocationSearch = ({
       if (
         !fieldIsActive ||
         disabled ||
-        trimmedQuery.length < 3 ||
+        trimmedQuery.length < MIN_SEARCH_LENGTH ||
         (hasSelectedLocation && trimmedQuery === lastSelectedValue)
       ) {
         setSuggestions([]);
@@ -98,8 +103,8 @@ const LocationSearch = ({
       try {
         const data = await fetchGeoapifyLocations(trimmedQuery, controller.signal);
         setSuggestions(data);
-        setNoResults(trimmedQuery.length >= 3 && data.length === 0);
-        setIsOpen(trimmedQuery.length >= 3);
+        setNoResults(trimmedQuery.length >= MIN_SEARCH_LENGTH && data.length === 0);
+        setIsOpen(fieldIsActive && trimmedQuery.length >= MIN_SEARCH_LENGTH);
       } catch (error) {
         if (error.name !== 'AbortError') {
           setSuggestions([]);
@@ -111,13 +116,13 @@ const LocationSearch = ({
       }
     };
 
-    const timer = setTimeout(searchLocation, 600);
+    const timer = setTimeout(searchLocation, 350);
 
     return () => {
       clearTimeout(timer);
       controller.abort();
     };
-  }, [query, defaultValue, fieldIsActive, disabled, hasSelectedLocation, lastSelectedValue]);
+  }, [query, fieldIsActive, disabled, hasSelectedLocation, lastSelectedValue]);
 
   const handleSelect = (place) => {
     const selectedPlace = {
@@ -134,12 +139,22 @@ const LocationSearch = ({
     setLastSelectedValue(selectedText.trim());
     onChange?.(selectedPlace);
     onSelect?.(selectedPlace);
+    setIsFocused(false);
     inputRef.current?.blur();
     onCloseAll?.();
   };
 
   return (
-    <div className="relative w-full" ref={wrapperRef}>
+    <div
+      className="relative w-full"
+      ref={wrapperRef}
+      onMouseDown={() => {
+        if (!disabled) {
+          onActivate?.();
+          onOpen?.();
+        }
+      }}
+    >
       {label ? (
         <label className="mb-2 block text-sm font-semibold text-slate-700">
           {label}
@@ -157,13 +172,11 @@ const LocationSearch = ({
           onChange={(e) => {
             const valueText = e.target.value;
             const trimmedValue = valueText.trim();
-            const isManualEdit = valueText.trim() !== lastSelectedValue;
-            if (isManualEdit && trimmedValue) {
-              setHasSelectedLocation(false);
-              setNoResults(false);
-              onChange?.(valueText);
-            }
+            const isManualEdit = trimmedValue !== lastSelectedValue;
+
             setQuery(valueText);
+            onActivate?.();
+
             if (!trimmedValue) {
               setSuggestions([]);
               setIsOpen(false);
@@ -171,18 +184,30 @@ const LocationSearch = ({
               setHasSelectedLocation(false);
               setLastSelectedValue('');
               onChange?.('');
+              return;
+            }
+
+            if (isManualEdit) {
+              setHasSelectedLocation(false);
+              setNoResults(false);
+              onChange?.(valueText);
+              if (!disabled && trimmedValue.length >= MIN_SEARCH_LENGTH) {
+                setIsOpen(true);
+              }
             }
           }}
           onFocus={() => {
+            setIsFocused(true);
             onActivate?.();
             onOpen?.();
-            if (hasSelectedLocation && query.trim() === lastSelectedValue) return;
-            if (!disabled && query.trim().length >= 3) {
+            if (selectionLocked) return;
+            if (!disabled && query.trim().length >= MIN_SEARCH_LENGTH) {
               setIsOpen(true);
             }
           }}
           onKeyDown={(e) => {
             if (e.key === 'Enter') {
+              setIsFocused(false);
               setIsOpen(false);
               setSuggestions([]);
               onCloseAll?.();
@@ -197,7 +222,7 @@ const LocationSearch = ({
         )}
       </div>
 
-      {isOpen && (
+      {isOpen && fieldIsActive && !selectionLocked && (
         <div className="absolute top-full left-0 right-0 mt-2 max-h-60 overflow-y-auto bg-white rounded-xl shadow-xl border border-slate-100 z-50 md:max-h-72">
           {suggestions.map((place) => (
             <button

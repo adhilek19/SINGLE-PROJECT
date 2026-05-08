@@ -1,5 +1,9 @@
-const GEOAPIFY_BASE_URL = 'https://api.geoapify.com/v1/geocode/autocomplete';
+const GEOAPIFY_AUTOCOMPLETE_URL = 'https://api.geoapify.com/v1/geocode/autocomplete';
+const GEOAPIFY_SEARCH_URL = 'https://api.geoapify.com/v1/geocode/search';
+const MIN_QUERY_LENGTH = 2;
 let hasWarnedMissingApiKey = false;
+
+const getGeoapifyKey = () => import.meta.env.VITE_GEOAPIFY_API_KEY;
 
 const normalizeText = (value) =>
   String(value || '')
@@ -42,6 +46,9 @@ const normalizeFeature = (feature) => {
   const name =
     props.name ||
     props.address_line1 ||
+    props.city ||
+    props.town ||
+    props.village ||
     props.formatted ||
     '';
 
@@ -59,11 +66,11 @@ const normalizeFeature = (feature) => {
   };
 };
 
-export const fetchGeoapifyLocations = async (query, signal) => {
+const fetchGeoapify = async ({ query, signal, mode = 'autocomplete' }) => {
   const trimmed = String(query || '').trim();
-  if (trimmed.length < 3) return [];
+  if (trimmed.length < MIN_QUERY_LENGTH) return [];
 
-  const apiKey = import.meta.env.VITE_GEOAPIFY_API_KEY;
+  const apiKey = getGeoapifyKey();
   if (!apiKey) {
     if (import.meta.env.DEV && !hasWarnedMissingApiKey) {
       hasWarnedMissingApiKey = true;
@@ -73,13 +80,12 @@ export const fetchGeoapifyLocations = async (query, signal) => {
     return [];
   }
 
-  const url = `${GEOAPIFY_BASE_URL}?text=${encodeURIComponent(
-    trimmed
-  )}&limit=5&filter=countrycode:in&apiKey=${encodeURIComponent(apiKey)}`;
+  const baseUrl = mode === 'search' ? GEOAPIFY_SEARCH_URL : GEOAPIFY_AUTOCOMPLETE_URL;
+  const url = `${baseUrl}?text=${encodeURIComponent(trimmed)}&limit=5&filter=countrycode:in&apiKey=${encodeURIComponent(apiKey)}`;
 
   const res = await fetch(url, { signal });
   if (!res.ok) {
-    throw new Error(`Autocomplete failed with status ${res.status}`);
+    throw new Error(`Geoapify ${mode} failed with status ${res.status}`);
   }
 
   const data = await res.json();
@@ -88,30 +94,41 @@ export const fetchGeoapifyLocations = async (query, signal) => {
   return features.map(normalizeFeature).filter(Boolean).slice(0, 5);
 };
 
+export const fetchGeoapifyLocations = async (query, signal) =>
+  fetchGeoapify({ query, signal, mode: 'autocomplete' });
+
 export const resolveGeoapifyBestLocation = async (query, signal) => {
-  const results = await fetchGeoapifyLocations(query, signal);
-  if (!results.length) return null;
+  const autocompleteResults = await fetchGeoapify({ query, signal, mode: 'autocomplete' });
+  const searchResults = autocompleteResults.length
+    ? autocompleteResults
+    : await fetchGeoapify({ query, signal, mode: 'search' });
+
+  if (!searchResults.length) return null;
 
   const normalizedQuery = normalizeText(query);
   if (!normalizedQuery) return null;
 
-  const best = results
+  const best = searchResults
     .map((item) => {
       const normalizedLabel = normalizeText(item.label || item.name || '');
       const normalizedName = normalizeText(item.name || item.label || '');
+      const normalizedCity = normalizeText(item.city || '');
       const labelScore = diceCoefficient(normalizedQuery, normalizedLabel);
       const nameScore = diceCoefficient(normalizedQuery, normalizedName);
+      const cityScore = diceCoefficient(normalizedQuery, normalizedCity);
       const includesBoost =
-        normalizedLabel.includes(normalizedQuery) || normalizedQuery.includes(normalizedName)
-          ? 0.2
+        normalizedLabel.includes(normalizedQuery) ||
+        normalizedName.includes(normalizedQuery) ||
+        normalizedCity.includes(normalizedQuery)
+          ? 0.25
           : 0;
       return {
         item,
-        score: Math.max(labelScore, nameScore) + includesBoost,
+        score: Math.max(labelScore, nameScore, cityScore) + includesBoost,
       };
     })
     .sort((a, b) => b.score - a.score)[0];
 
-  if (!best || best.score < 0.48) return null;
+  if (!best || best.score < 0.42) return searchResults[0];
   return best.item;
 };

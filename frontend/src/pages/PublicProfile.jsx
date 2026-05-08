@@ -51,7 +51,7 @@ const RideMiniCard = ({ ride, showDriver = false }) => {
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
           <p className="font-black text-slate-900 line-clamp-1">
-            {ride.source?.name || 'Source'} → {ride.destination?.name || 'Destination'}
+            {ride.source?.name || 'Source'} to {ride.destination?.name || 'Destination'}
           </p>
 
           <p className="mt-1 flex items-center gap-1 text-xs font-semibold text-slate-500">
@@ -69,7 +69,7 @@ const RideMiniCard = ({ ride, showDriver = false }) => {
         <span className="flex items-center gap-1 capitalize">
           <Car className="h-3.5 w-3.5" />
           {ride.vehicle?.type || 'vehicle'}
-          {ride.vehicle?.model ? ` • ${ride.vehicle.model}` : ''}
+          {ride.vehicle?.model ? ` - ${ride.vehicle.model}` : ''}
         </span>
 
         {ride.price !== undefined && ride.price !== null ? (
@@ -82,7 +82,7 @@ const RideMiniCard = ({ ride, showDriver = false }) => {
 
       {showDriver && ride.driver?.name ? (
         <Link
-          to={`/users/${driverId}`}
+          to={`/profile/${driverId}`}
           className="mt-3 inline-flex items-center gap-2 text-xs font-black text-blue-700 hover:text-blue-900"
         >
           <User className="h-3.5 w-3.5" />
@@ -135,7 +135,7 @@ const PublicProfile = () => {
 
   useEffect(() => {
     loadProfile();
-  }, [id, navigate]);
+  }, [id]);
 
   if (loading) {
     return (
@@ -232,9 +232,15 @@ const PublicProfile = () => {
               </div>
 
               <div className="grid grid-cols-3 gap-3 sm:min-w-[360px]">
+                <StatCard
+                  label="Ride count"
+                  value={
+                    profile.rideCount ??
+                    ((stats.driverRideCount || 0) + (stats.passengerRideCount || 0))
+                  }
+                />
                 <StatCard label="Driver rides" value={stats.driverRideCount ?? 0} />
                 <StatCard label="Passenger trips" value={stats.passengerRideCount ?? 0} />
-                <StatCard label="Reviews" value={reviews.length} />
               </div>
             </div>
           </div>
@@ -356,7 +362,7 @@ const PublicProfile = () => {
 
                 <p className="text-sm text-slate-600 mt-2 capitalize">
                   {profile.vehicle?.type || 'Not added'}
-                  {profile.vehicle?.model ? ` • ${profile.vehicle.model}` : ''}
+                  {profile.vehicle?.model ? ` - ${profile.vehicle.model}` : ''}
                 </p>
               </div>
 

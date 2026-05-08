@@ -10,6 +10,17 @@ import {
 } from 'lucide-react';
 import LocationSearch from '../components/LocationSearch';
 
+const getLocationText = (place) => {
+  if (!place) return '';
+  if (typeof place === 'string') return place.trim();
+  return String(place.name || place.label || '').trim();
+};
+
+const hasCoords = (place) => {
+  if (!place || typeof place !== 'object') return false;
+  return Number.isFinite(Number(place.lat)) && Number.isFinite(Number(place.lng));
+};
+
 const Home = () => {
   const dispatch = useDispatch();
   const navigate = useNavigate();
@@ -26,20 +37,21 @@ const Home = () => {
     setCloseSuggestionsSignal((prev) => prev + 1);
 
     const params = new URLSearchParams();
-    const fromName = from?.name || from?.label || '';
-    const toName = to?.name || to?.label || '';
+    const fromName = getLocationText(from);
+    const toName = getLocationText(to);
 
     if (fromName) params.set('from', fromName);
     if (toName) params.set('to', toName);
-    if (Number.isFinite(Number(from?.lat)) && Number.isFinite(Number(from?.lng))) {
+    if (hasCoords(from)) {
       params.set('fromLat', String(Number(from.lat)));
       params.set('fromLng', String(Number(from.lng)));
     }
-    if (Number.isFinite(Number(to?.lat)) && Number.isFinite(Number(to?.lng))) {
+    if (hasCoords(to)) {
       params.set('toLat', String(Number(to.lat)));
       params.set('toLng', String(Number(to.lng)));
     }
     if (date) params.set('date', date);
+    if (fromName || toName || date) params.set('autoSearch', '1');
 
     dispatch({
       type: 'search/setSearch',

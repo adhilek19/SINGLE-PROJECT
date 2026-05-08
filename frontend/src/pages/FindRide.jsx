@@ -3,11 +3,12 @@ import {
   Calendar,
   Car,
   IndianRupee,
-  LocateFixed,
   RefreshCw,
   Search,
+  SlidersHorizontal,
   Star,
   Users,
+  X,
 } from 'lucide-react';
 import { Link, useSearchParams } from 'react-router-dom';
 import toast from 'react-hot-toast';
@@ -21,22 +22,52 @@ const SEARCH_STATE_KEY = 'sahayatri_find_ride_search_v3';
 const HISTORY_LIMIT = 3;
 const SEARCH_WINDOW_HOURS = 6;
 
+const DEFAULT_PREFERENCE_FILTERS = {
+  womenOnly: false,
+  verifiedOnly: false,
+  smokingAllowed: false,
+  musicAllowed: false,
+  petsAllowed: false,
+  acAvailable: false,
+  genderPreference: '',
+};
+
+const PRICE_PRESET_TO_RANGE = {
+  any: { min: '', max: '' },
+  free: { min: '0', max: '0' },
+  under_50: { min: '', max: '50' },
+  between_50_100: { min: '50', max: '100' },
+  over_100: { min: '100', max: '' },
+};
+
+const RANGE_TO_PRICE_PRESET = {
+  '|': 'any',
+  '0|0': 'free',
+  '|50': 'under_50',
+  '50|100': 'between_50_100',
+  '100|': 'over_100',
+};
+
+const DEFAULT_UI_FILTERS = {
+  vehicleType: '',
+  seats: '',
+  pricePreset: 'any',
+  timeWindow: 'any',
+  sortUi: 'recommended',
+};
+
 const EmptyState = ({ title, message }) => (
-  <div className="rounded-3xl border border-dashed border-slate-300 bg-white p-10 text-center">
+  <div className="rounded-2xl border border-dashed border-slate-300 bg-white p-10 text-center">
     <div className="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-2xl bg-slate-100 text-slate-500">
       <Search />
     </div>
-
     <h3 className="text-xl font-black text-slate-900">{title}</h3>
-
-    <p className="mx-auto mt-2 max-w-md text-sm leading-6 text-slate-600">
-      {message}
-    </p>
+    <p className="mx-auto mt-2 max-w-md text-sm leading-6 text-slate-600">{message}</p>
   </div>
 );
 
 const ErrorState = ({ message, onRetry }) => (
-  <div className="rounded-3xl border border-rose-200 bg-rose-50 p-8 text-center">
+  <div className="rounded-2xl border border-rose-200 bg-rose-50 p-8 text-center">
     <h3 className="text-xl font-black text-rose-900">Search failed</h3>
     <p className="mx-auto mt-2 max-w-md text-sm text-rose-700">{message}</p>
     <button
@@ -52,11 +83,7 @@ const ErrorState = ({ message, onRetry }) => (
 
 const formatDateTime = (value) => {
   if (!value) return 'Not set';
-
-  return new Date(value).toLocaleString([], {
-    dateStyle: 'medium',
-    timeStyle: 'short',
-  });
+  return new Date(value).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' });
 };
 
 const formatHistoryDateTime = (date, time) => {
@@ -103,6 +130,35 @@ const normalizeListResponse = (res) => {
   return [];
 };
 
+const mapLegacySortToUi = (value) => {
+  if (value === 'price_low') return 'lowest_price';
+  if (value === 'departure_time') return 'earliest';
+  return 'recommended';
+};
+
+const mapUiSortToQuery = (value) => {
+  if (value === 'earliest') return 'departure_time';
+  if (value === 'lowest_price') return 'price_low';
+  return 'departure_time';
+};
+
+const mapMinMaxToPricePreset = (minPrice, maxPrice) => RANGE_TO_PRICE_PRESET[`${minPrice || ''}|${maxPrice || ''}`] || 'any';
+
+const getRideSeatsLeft = (ride) =>
+  ride.seatsLeft ?? Math.max(0, Number(ride.seatsAvailable || 0) - Number(ride.bookedSeats || 0));
+
+const rideMatchesTimeWindow = (ride, timeWindow) => {
+  if (!timeWindow || timeWindow === 'any') return true;
+  const date = new Date(ride.departureTime);
+  if (Number.isNaN(date.getTime())) return false;
+  const hour = date.getHours();
+  if (timeWindow === 'morning') return hour >= 5 && hour < 12;
+  if (timeWindow === 'afternoon') return hour >= 12 && hour < 17;
+  if (timeWindow === 'evening') return hour >= 17 && hour < 21;
+  if (timeWindow === 'night') return hour >= 21 || hour < 5;
+  return true;
+};
+
 const makeHistoryItem = ({ fromText, toText, fromLocation, toLocation, dateTime, filters }) => {
   const dt = dateTime ? new Date(dateTime) : null;
   const date = dt && !Number.isNaN(dt.getTime()) ? dt.toISOString().slice(0, 10) : '';
@@ -122,47 +178,34 @@ const makeHistoryItem = ({ fromText, toText, fromLocation, toLocation, dateTime,
   };
 };
 
-const historyEquals = (a, b) =>
-  JSON.stringify(a || {}) === JSON.stringify(b || {});
+const historyEquals = (a, b) => JSON.stringify(a || {}) === JSON.stringify(b || {});
 
 const RideCard = ({ ride, currentUserId }) => {
   const driver = ride.driverInfo || ride.driver || {};
-  const seatsLeft =
-    ride.seatsLeft ??
-    Math.max(0, Number(ride.seatsAvailable || 0) - Number(ride.bookedSeats || 0));
+  const seatsLeft = getRideSeatsLeft(ride);
   const isOwner = Boolean(currentUserId && String(driver._id || ride.driver) === String(currentUserId));
   const isFull = seatsLeft <= 0;
 
   return (
-    <div className="overflow-hidden rounded-3xl bg-white shadow-sm ring-1 ring-slate-200 transition hover:-translate-y-1 hover:shadow-xl">
+    <div className="overflow-hidden rounded-2xl bg-white shadow-sm ring-1 ring-slate-200 transition hover:-translate-y-0.5 hover:shadow-md">
       {ride.vehicle?.image ? (
-        <img
-          src={ride.vehicle.image}
-          alt={ride.vehicle?.model || 'Vehicle'}
-          className="h-44 w-full object-cover"
-        />
+        <img src={ride.vehicle.image} alt={ride.vehicle?.model || 'Vehicle'} className="h-40 w-full object-cover" />
       ) : (
-        <div className="flex h-44 w-full items-center justify-center bg-slate-100 text-slate-400">
-          <Car size={42} />
+        <div className="flex h-40 w-full items-center justify-center bg-slate-100 text-slate-400">
+          <Car size={40} />
         </div>
       )}
 
       <div className="p-5">
         <div className="mb-3">
-          <h3 className="text-xl font-black text-slate-900">
+          <h3 className="text-lg font-black text-slate-900">
             {ride.source?.name || 'Source'} to {ride.destination?.name || 'Destination'}
           </h3>
-
-          <p className="mt-1 text-sm text-slate-500 flex items-center gap-2">
-            {driver.profilePic ? (
-              <img src={driver.profilePic} alt={driver.name || 'Driver'} className="h-6 w-6 rounded-full object-cover" />
-            ) : null}
+          <p className="mt-1 flex items-center gap-2 text-sm text-slate-500">
+            {driver.profilePic ? <img src={driver.profilePic} alt={driver.name || 'Driver'} className="h-6 w-6 rounded-full object-cover" /> : null}
             by{' '}
             {driver._id ? (
-              <Link
-                to={`/users/${driver._id}`}
-                className="font-bold text-blue-600 hover:text-blue-700"
-              >
+              <Link to={`/profile/${driver._id}`} className="font-bold text-blue-600 hover:text-blue-700">
                 {driver.name || 'Driver'}
               </Link>
             ) : (
@@ -171,27 +214,11 @@ const RideCard = ({ ride, currentUserId }) => {
           </p>
         </div>
 
-        <div className="grid gap-3 text-sm text-slate-600">
-          <div className="flex items-center gap-2">
-            <Calendar size={16} />
-            {formatDateTime(ride.departureTime)}
-          </div>
-
-          <div className="flex items-center gap-2">
-            <Users size={16} />
-            {seatsLeft} seat(s) left
-          </div>
-
-          <div className="flex items-center gap-2">
-            <IndianRupee size={16} />
-            Rs {ride.price || 0} per seat
-          </div>
-
-          <div className="flex items-center gap-2">
-            <Car size={16} />
-            {ride.vehicle?.type || 'Vehicle'}
-            {ride.vehicle?.model ? ` - ${ride.vehicle.model}` : ''}
-          </div>
+        <div className="grid gap-2 text-sm text-slate-600">
+          <div className="flex items-center gap-2"><Calendar size={16} />{formatDateTime(ride.departureTime)}</div>
+          <div className="flex items-center gap-2"><Users size={16} />{seatsLeft} seat(s) left</div>
+          <div className="flex items-center gap-2"><IndianRupee size={16} />Rs {ride.price || 0} per seat</div>
+          <div className="flex items-center gap-2"><Car size={16} />{ride.vehicle?.type || 'Vehicle'}{ride.vehicle?.model ? ` - ${ride.vehicle.model}` : ''}</div>
         </div>
 
         {driver.rating ? (
@@ -202,10 +229,7 @@ const RideCard = ({ ride, currentUserId }) => {
         ) : null}
 
         <div className="mt-5 flex gap-3">
-          <Link
-            to={`/ride/${ride._id}`}
-            className="flex-1 rounded-2xl bg-slate-950 px-4 py-3 text-center text-sm font-bold text-white transition hover:bg-slate-800"
-          >
+          <Link to={`/ride/${ride._id}`} className="flex-1 rounded-xl bg-slate-950 px-4 py-3 text-center text-sm font-bold text-white transition hover:bg-slate-800">
             View Details
           </Link>
 
@@ -213,10 +237,8 @@ const RideCard = ({ ride, currentUserId }) => {
             <Link
               to={`/ride/${ride._id}`}
               aria-disabled={isFull}
-              className={`flex-1 rounded-2xl px-4 py-3 text-center text-sm font-bold transition ${
-                isFull
-                  ? 'bg-slate-200 text-slate-500 pointer-events-none'
-                  : 'bg-emerald-600 text-white hover:bg-emerald-700'
+              className={`flex-1 rounded-xl px-4 py-3 text-center text-sm font-bold transition ${
+                isFull ? 'pointer-events-none bg-slate-200 text-slate-500' : 'bg-emerald-600 text-white hover:bg-emerald-700'
               }`}
             >
               {isFull ? 'Ride Full' : 'Request Seat'}
@@ -227,6 +249,26 @@ const RideCard = ({ ride, currentUserId }) => {
     </div>
   );
 };
+
+const FilterGroup = ({ title, value, onChange, options, name }) => (
+  <div>
+    <p className="mb-3 text-sm font-bold text-slate-800">{title}</p>
+    <div className="space-y-2">
+      {options.map((option) => (
+        <label key={option.value} className="flex cursor-pointer items-center gap-2 text-sm text-slate-600">
+          <input
+            type="radio"
+            name={name}
+            checked={value === option.value}
+            onChange={() => onChange(option.value)}
+            className="h-4 w-4 border-slate-300 text-blue-600 focus:ring-blue-200"
+          />
+          <span>{option.label}</span>
+        </label>
+      ))}
+    </div>
+  </div>
+);
 
 const FindRide = () => {
   const [searchParams, setSearchParams] = useSearchParams();
@@ -243,15 +285,11 @@ const FindRide = () => {
   const [sort, setSort] = useState('departure_time');
   const [lat, setLat] = useState('');
   const [lng, setLng] = useState('');
-  const [preferenceFilters, setPreferenceFilters] = useState({
-    womenOnly: false,
-    verifiedOnly: false,
-    smokingAllowed: false,
-    musicAllowed: false,
-    petsAllowed: false,
-    acAvailable: false,
-    genderPreference: '',
-  });
+  const [preferenceFilters, setPreferenceFilters] = useState(DEFAULT_PREFERENCE_FILTERS);
+
+  const [draftFilters, setDraftFilters] = useState(DEFAULT_UI_FILTERS);
+  const [appliedFilters, setAppliedFilters] = useState(DEFAULT_UI_FILTERS);
+  const [mobileFiltersOpen, setMobileFiltersOpen] = useState(false);
 
   const [rides, setRides] = useState([]);
   const [loading, setLoading] = useState(false);
@@ -265,10 +303,10 @@ const FindRide = () => {
   const [activeLocationDropdown, setActiveLocationDropdown] = useState(null);
   const [fromCorrectionHint, setFromCorrectionHint] = useState('');
   const [toCorrectionHint, setToCorrectionHint] = useState('');
+  const [searchStateReady, setSearchStateReady] = useState(false);
 
   const fromText = getSearchText(from);
   const toText = getSearchText(to);
-
   const noQueryTyped = !fromText && !toText;
 
   const closeAllDropdowns = () => {
@@ -288,19 +326,10 @@ const FindRide = () => {
       radiusKm !== '' ||
       Object.values(preferenceFilters).some((value) => value !== '' && value !== false)
     );
-  }, [
-    fromText,
-    toText,
-    dateTime,
-    vehicleType,
-    minPrice,
-    maxPrice,
-    seats,
-    radiusKm,
-    preferenceFilters,
-  ]);
+  }, [fromText, toText, dateTime, vehicleType, minPrice, maxPrice, seats, radiusKm, preferenceFilters]);
 
   const saveSearchState = () => {
+    if (!searchStateReady) return;
     const payload = {
       fromText,
       toText,
@@ -318,6 +347,7 @@ const FindRide = () => {
       lat,
       lng,
       preferenceFilters,
+      uiFilters: appliedFilters,
     };
     localStorage.setItem(SEARCH_STATE_KEY, JSON.stringify(payload));
   };
@@ -329,15 +359,7 @@ const FindRide = () => {
       fromLocation: from,
       toLocation: to,
       dateTime,
-      filters: {
-        vehicleType,
-        minPrice,
-        maxPrice,
-        seats,
-        radiusKm,
-        sort,
-        preferenceFilters,
-      },
+      filters: { vehicleType, minPrice, maxPrice, seats, radiusKm, sort, preferenceFilters },
     });
 
     if (!historyItem.source && !historyItem.destination) return;
@@ -353,35 +375,13 @@ const FindRide = () => {
   useEffect(() => {
     saveSearchState();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [
-    fromText,
-    toText,
-    from?.lat,
-    from?.lng,
-    to?.lat,
-    to?.lng,
-    dateTime,
-    vehicleType,
-    minPrice,
-    maxPrice,
-    seats,
-    radiusKm,
-    sort,
-    lat,
-    lng,
-    preferenceFilters,
-  ]);
+  }, [searchStateReady, fromText, toText, from?.lat, from?.lng, to?.lat, to?.lng, dateTime, vehicleType, minPrice, maxPrice, seats, radiusKm, sort, lat, lng, preferenceFilters, appliedFilters]);
 
   const buildTimeWindow = (rawDateTime) => {
     if (!rawDateTime) return {};
-
     const selected = new Date(rawDateTime);
-    if (Number.isNaN(selected.getTime())) {
-      throw new Error('Invalid date/time selected for search');
-    }
-
+    if (Number.isNaN(selected.getTime())) throw new Error('Invalid date/time selected for search');
     const toWindow = new Date(selected.getTime() + SEARCH_WINDOW_HOURS * 60 * 60 * 1000);
-
     return {
       timeFrom: selected.toISOString(),
       timeTo: toWindow.toISOString(),
@@ -392,9 +392,7 @@ const FindRide = () => {
   const resolveLocationForSearch = async (place) => {
     const rawText = getSearchText(place).trim();
     if (!rawText) return { location: null, correctedLabel: '' };
-    if (hasLocationCoords(place)) {
-      return { location: { ...place, name: rawText }, correctedLabel: '' };
-    }
+    if (hasLocationCoords(place)) return { location: { ...place, name: rawText }, correctedLabel: '' };
 
     try {
       const resolved = await resolveGeoapifyBestLocation(rawText);
@@ -405,33 +403,21 @@ const FindRide = () => {
           label: resolved.label || resolved.name || rawText,
         };
         const correctedText = normalized.label || normalized.name || '';
-        const normalizedRaw = rawText.toLowerCase().trim();
-        const normalizedCorrected = correctedText.toLowerCase().trim();
-        const shouldHint = normalizedCorrected && normalizedCorrected !== normalizedRaw;
-        return {
-          location: normalized,
-          correctedLabel: shouldHint ? correctedText : '',
-        };
+        const shouldHint = correctedText.toLowerCase().trim() !== rawText.toLowerCase().trim();
+        return { location: normalized, correctedLabel: shouldHint ? correctedText : '' };
       }
     } catch {
-      // Manual text search fallback stays active when autocomplete/geocode fails.
+      // fallback
     }
 
-    return {
-      location: { name: rawText },
-      correctedLabel: '',
-    };
+    return { location: { name: rawText }, correctedLabel: '' };
   };
 
   const buildParamsFromState = async () => {
     const resolvedFrom = await resolveLocationForSearch(from);
     const resolvedTo = await resolveLocationForSearch(to);
 
-    const params = {
-      page: 1,
-      limit: 30,
-      sort,
-    };
+    const params = { page: 1, limit: 30, sort };
 
     const resolvedFromText = getSearchText(resolvedFrom.location);
     const resolvedToText = getSearchText(resolvedTo.location);
@@ -449,10 +435,8 @@ const FindRide = () => {
       params.toLng = Number(resolvedTo.location.lng);
     }
 
-    const timeWindow = buildTimeWindow(dateTime);
-    Object.assign(params, timeWindow);
+    Object.assign(params, buildTimeWindow(dateTime));
     if (dateTime) params.dateTime = dateTime;
-
     if (vehicleType) params.vehicleType = vehicleType;
 
     const parsedMinPrice = parseNumberIfValid(minPrice);
@@ -475,11 +459,7 @@ const FindRide = () => {
       if (value !== false && value !== '') params[key] = value;
     });
 
-    return {
-      params,
-      resolvedFrom,
-      resolvedTo,
-    };
+    return { params, resolvedFrom, resolvedTo };
   };
 
   const applySearchParamsToUrl = (params) => {
@@ -492,7 +472,6 @@ const FindRide = () => {
 
   const fetchRides = async (params = {}) => {
     if (loading) return;
-
     try {
       setLoading(true);
       setSearchError('');
@@ -504,20 +483,14 @@ const FindRide = () => {
       saveSearchState();
       saveSearchHistory();
     } catch (err) {
-      const message = getErrorMessage(err, 'Failed to fetch rides');
-      setSearchError(message);
+      setSearchError(getErrorMessage(err, 'Failed to fetch rides'));
       setRides([]);
     } finally {
       setLoading(false);
     }
   };
 
-  const fetchNearbyRides = async ({
-    lat: latValue,
-    lng: lngValue,
-    radius = 10,
-    extra = {},
-  }) => {
+  const fetchNearbyRides = async ({ lat: latValue, lng: lngValue, radius = 10, extra = {} }) => {
     if (loading) return;
 
     try {
@@ -548,10 +521,8 @@ const FindRide = () => {
     }
   };
 
-  const handleSubmit = async (e) => {
-    e.preventDefault();
+  const runSearch = async () => {
     if (loading) return;
-
     closeAllDropdowns();
     setFromCorrectionHint('');
     setToCorrectionHint('');
@@ -561,16 +532,11 @@ const FindRide = () => {
 
       if (resolvedFrom.location) {
         setFrom(resolvedFrom.location);
-        if (resolvedFrom.correctedLabel) {
-          setFromCorrectionHint(`Showing results for ${resolvedFrom.correctedLabel}`);
-        }
+        if (resolvedFrom.correctedLabel) setFromCorrectionHint(`Showing results for ${resolvedFrom.correctedLabel}`);
       }
-
       if (resolvedTo.location) {
         setTo(resolvedTo.location);
-        if (resolvedTo.correctedLabel) {
-          setToCorrectionHint(`Showing results for ${resolvedTo.correctedLabel}`);
-        }
+        if (resolvedTo.correctedLabel) setToCorrectionHint(`Showing results for ${resolvedTo.correctedLabel}`);
       }
 
       applySearchParamsToUrl(params);
@@ -581,37 +547,41 @@ const FindRide = () => {
     }
   };
 
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    await runSearch();
+  };
+
+  const handleClearSearch = () => {
+    closeAllDropdowns();
+    setFrom(null);
+    setTo(null);
+    setDateTime('');
+    setVehicleType('');
+    setMinPrice('');
+    setMaxPrice('');
+    setSeats('');
+    setRadiusKm('');
+    setSort('departure_time');
+    setLat('');
+    setLng('');
+    setPreferenceFilters({ ...DEFAULT_PREFERENCE_FILTERS });
+    setDraftFilters(DEFAULT_UI_FILTERS);
+    setAppliedFilters(DEFAULT_UI_FILTERS);
+    setFromCorrectionHint('');
+    setToCorrectionHint('');
+    setSearchError('');
+    setLastSearchParams(null);
+    setNearbyMode(false);
+    setNearbyCount(0);
+    setRides([]);
+    localStorage.removeItem(SEARCH_STATE_KEY);
+    setSearchParams(new URLSearchParams());
+  };
+
   const handleRetry = () => {
     if (!lastSearchParams) return;
     fetchRides(lastSearchParams);
-  };
-
-  const useCurrentLocation = () => {
-    if (!navigator.geolocation) {
-      toast.error('Geolocation not supported');
-      return;
-    }
-
-    if (locating) return;
-
-    setLocating(true);
-    navigator.geolocation.getCurrentPosition(
-      (position) => {
-        setLat(String(position.coords.latitude));
-        setLng(String(position.coords.longitude));
-        if (!radiusKm) setRadiusKm('10');
-        setLocating(false);
-        toast.success('Current location added');
-      },
-      () => {
-        setLocating(false);
-        toast.error('Location permission denied. You can still search manually.');
-      },
-      {
-        enableHighAccuracy: true,
-        timeout: 10000,
-      }
-    );
   };
 
   const applyHistoryItem = (item) => {
@@ -620,24 +590,95 @@ const FindRide = () => {
     setDateTime(item?.dateTime || '');
 
     const filters = item?.filters || {};
+    const restoredUi = {
+      vehicleType: filters.vehicleType || '',
+      seats: filters.seats || '',
+      pricePreset: mapMinMaxToPricePreset(filters.minPrice || '', filters.maxPrice || ''),
+      timeWindow: 'any',
+      sortUi: mapLegacySortToUi(filters.sort || 'departure_time'),
+    };
+
     setVehicleType(filters.vehicleType || '');
     setMinPrice(filters.minPrice || '');
     setMaxPrice(filters.maxPrice || '');
     setSeats(filters.seats || '');
     setRadiusKm(filters.radiusKm || '');
     setSort(filters.sort || 'departure_time');
-    setPreferenceFilters(filters.preferenceFilters || {
-      womenOnly: false,
-      verifiedOnly: false,
-      smokingAllowed: false,
-      musicAllowed: false,
-      petsAllowed: false,
-      acAvailable: false,
-      genderPreference: '',
-    });
+    setPreferenceFilters(filters.preferenceFilters || DEFAULT_PREFERENCE_FILTERS);
+    setDraftFilters(restoredUi);
+    setAppliedFilters(restoredUi);
     setFromCorrectionHint('');
     setToCorrectionHint('');
     closeAllDropdowns();
+  };
+
+  const applyFiltersAndSearch = async () => {
+    const range = PRICE_PRESET_TO_RANGE[draftFilters.pricePreset] || PRICE_PRESET_TO_RANGE.any;
+    setVehicleType(draftFilters.vehicleType);
+    setSeats(draftFilters.seats);
+    setMinPrice(range.min);
+    setMaxPrice(range.max);
+    setSort(mapUiSortToQuery(draftFilters.sortUi));
+    setAppliedFilters(draftFilters);
+    setMobileFiltersOpen(false);
+    await runSearch();
+  };
+
+  const clearDraftFilters = () => setDraftFilters(DEFAULT_UI_FILTERS);
+
+  const clearAppliedFilters = () => {
+    setDraftFilters(DEFAULT_UI_FILTERS);
+    setAppliedFilters(DEFAULT_UI_FILTERS);
+    setVehicleType('');
+    setSeats('');
+    setMinPrice('');
+    setMaxPrice('');
+    setSort('departure_time');
+  };
+
+  const activeFilterChips = useMemo(() => {
+    const chips = [];
+    if (appliedFilters.vehicleType) chips.push({ key: 'vehicleType', label: appliedFilters.vehicleType === 'car' ? 'Car' : 'Bike' });
+    if (appliedFilters.seats) chips.push({ key: 'seats', label: `${appliedFilters.seats}+ seats` });
+    if (appliedFilters.pricePreset !== 'any') {
+      const labelMap = {
+        free: 'Free',
+        under_50: 'Under ₹50',
+        between_50_100: '₹50 - ₹100',
+        over_100: '₹100+',
+      };
+      chips.push({ key: 'pricePreset', label: labelMap[appliedFilters.pricePreset] || appliedFilters.pricePreset });
+    }
+    if (appliedFilters.timeWindow !== 'any') {
+      const label = appliedFilters.timeWindow.charAt(0).toUpperCase() + appliedFilters.timeWindow.slice(1);
+      chips.push({ key: 'timeWindow', label });
+    }
+    return chips;
+  }, [appliedFilters]);
+
+  const displayedRides = useMemo(() => {
+    let result = rides.filter((ride) => rideMatchesTimeWindow(ride, appliedFilters.timeWindow));
+    if (appliedFilters.sortUi === 'most_seats') {
+      result = [...result].sort((a, b) => getRideSeatsLeft(b) - getRideSeatsLeft(a));
+    }
+    return result;
+  }, [rides, appliedFilters]);
+
+  const removeChip = async (key) => {
+    const next = { ...appliedFilters };
+    if (key === 'pricePreset') next.pricePreset = 'any';
+    else if (key === 'timeWindow') next.timeWindow = 'any';
+    else next[key] = '';
+    setDraftFilters(next);
+    setAppliedFilters(next);
+
+    const range = PRICE_PRESET_TO_RANGE[next.pricePreset] || PRICE_PRESET_TO_RANGE.any;
+    setVehicleType(next.vehicleType);
+    setSeats(next.seats);
+    setMinPrice(range.min);
+    setMaxPrice(range.max);
+    setSort(mapUiSortToQuery(next.sortUi));
+    await runSearch();
   };
 
   useEffect(() => {
@@ -650,16 +691,6 @@ const FindRide = () => {
         // ignore corrupt history
       }
     }
-
-    const defaultFilters = {
-      womenOnly: false,
-      verifiedOnly: false,
-      smokingAllowed: false,
-      musicAllowed: false,
-      petsAllowed: false,
-      acAvailable: false,
-      genderPreference: '',
-    };
 
     const paramsFromUrl = {
       from: searchParams.get('from') || searchParams.get('source') || '',
@@ -711,15 +742,23 @@ const FindRide = () => {
       setLat(paramsFromUrl.lat);
       setLng(paramsFromUrl.lng);
       setPreferenceFilters(paramsFromUrl.preferenceFilters);
+
+      const uiFromUrl = {
+        vehicleType: paramsFromUrl.vehicleType || '',
+        seats: paramsFromUrl.seats || '',
+        pricePreset: mapMinMaxToPricePreset(paramsFromUrl.minPrice, paramsFromUrl.maxPrice),
+        timeWindow: 'any',
+        sortUi: mapLegacySortToUi(paramsFromUrl.sort),
+      };
+      setDraftFilters(uiFromUrl);
+      setAppliedFilters(uiFromUrl);
+
       setFromCorrectionHint('');
       setToCorrectionHint('');
       closeAllDropdowns();
+      setSearchStateReady(true);
 
-      const initialParams = {
-        page: Number(searchParams.get('page') || 1),
-        limit: Number(searchParams.get('limit') || 30),
-        sort: paramsFromUrl.sort,
-      };
+      const initialParams = { page: Number(searchParams.get('page') || 1), limit: Number(searchParams.get('limit') || 30), sort: paramsFromUrl.sort };
       if (paramsFromUrl.from) initialParams.from = paramsFromUrl.from;
       if (paramsFromUrl.to) initialParams.to = paramsFromUrl.to;
       if (paramsFromUrl.fromLat !== '' && paramsFromUrl.fromLng !== '') {
@@ -758,9 +797,7 @@ const FindRide = () => {
         Boolean(paramsFromUrl.vehicleType || paramsFromUrl.minPrice || paramsFromUrl.maxPrice || paramsFromUrl.seats || paramsFromUrl.radiusKm) ||
         Object.values(paramsFromUrl.preferenceFilters).some((v) => v !== '' && v !== false);
 
-      if (shouldAutoSearchFromUrl) {
-        fetchRides(initialParams);
-      }
+      if (shouldAutoSearchFromUrl) fetchRides(initialParams);
       return;
     }
 
@@ -782,10 +819,22 @@ const FindRide = () => {
         setSort(parsed?.sort || 'departure_time');
         setLat(parsed?.lat || '');
         setLng(parsed?.lng || '');
-        setPreferenceFilters(parsed?.preferenceFilters || defaultFilters);
+        setPreferenceFilters(parsed?.preferenceFilters || DEFAULT_PREFERENCE_FILTERS);
+
+        const restoredUi = parsed?.uiFilters || {
+          vehicleType: parsed?.vehicleType || '',
+          seats: parsed?.seats || '',
+          pricePreset: mapMinMaxToPricePreset(parsed?.minPrice || '', parsed?.maxPrice || ''),
+          timeWindow: 'any',
+          sortUi: mapLegacySortToUi(parsed?.sort || 'departure_time'),
+        };
+
+        setDraftFilters(restoredUi);
+        setAppliedFilters(restoredUi);
         setFromCorrectionHint('');
         setToCorrectionHint('');
         closeAllDropdowns();
+        setSearchStateReady(true);
 
         const hasMeaningfulSavedState =
           Boolean(restoredFrom || restoredTo || parsed?.dateTime) ||
@@ -793,18 +842,14 @@ const FindRide = () => {
           Object.values(parsed?.preferenceFilters || {}).some((v) => v !== '' && v !== false);
 
         if (hasMeaningfulSavedState) {
-          const initialParams = {
-            page: 1,
-            limit: 30,
-            sort: parsed?.sort || 'departure_time',
-          };
+          const initialParams = { page: 1, limit: 30, sort: parsed?.sort || 'departure_time' };
           if (parsed?.fromText) initialParams.from = parsed.fromText;
           if (parsed?.toText) initialParams.to = parsed.toText;
-          if (parsed?.fromLat !== null && parsed?.fromLng !== null) {
+          if (parsed?.fromLat !== null && parsed?.fromLat !== undefined && parsed?.fromLng !== null && parsed?.fromLng !== undefined) {
             initialParams.fromLat = Number(parsed.fromLat);
             initialParams.fromLng = Number(parsed.fromLng);
           }
-          if (parsed?.toLat !== null && parsed?.toLng !== null) {
+          if (parsed?.toLat !== null && parsed?.toLat !== undefined && parsed?.toLng !== null && parsed?.toLng !== undefined) {
             initialParams.toLat = Number(parsed.toLat);
             initialParams.toLng = Number(parsed.toLng);
           }
@@ -836,6 +881,8 @@ const FindRide = () => {
         // ignore invalid state
       }
     }
+
+    setSearchStateReady(true);
 
     if (!navigator.geolocation) {
       fetchRides({ page: 1, limit: 30, sort: 'departure_time' });
@@ -873,212 +920,152 @@ const FindRide = () => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  const FiltersPanel = (
+    <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+      <div className="mb-4 flex items-center justify-between border-b border-slate-100 pb-3">
+        <h2 className="text-lg font-black text-slate-900">Filters</h2>
+        <button type="button" onClick={clearDraftFilters} className="text-sm font-semibold text-slate-500 hover:text-slate-700">Clear</button>
+      </div>
+
+      <div className="space-y-6">
+        <FilterGroup
+          title="Vehicle Type"
+          name="vehicle-type"
+          value={draftFilters.vehicleType}
+          onChange={(value) => setDraftFilters((prev) => ({ ...prev, vehicleType: value }))}
+          options={[{ label: 'Any', value: '' }, { label: 'Car', value: 'car' }, { label: 'Bike', value: 'bike' }]}
+        />
+
+        <FilterGroup
+          title="Seats"
+          name="seats"
+          value={draftFilters.seats}
+          onChange={(value) => setDraftFilters((prev) => ({ ...prev, seats: value }))}
+          options={[{ label: 'Any', value: '' }, { label: '1+', value: '1' }, { label: '2+', value: '2' }, { label: '3+', value: '3' }]}
+        />
+
+        <FilterGroup
+          title="Price Range"
+          name="price-range"
+          value={draftFilters.pricePreset}
+          onChange={(value) => setDraftFilters((prev) => ({ ...prev, pricePreset: value }))}
+          options={[
+            { label: 'Any', value: 'any' },
+            { label: 'Free', value: 'free' },
+            { label: 'Under ₹50', value: 'under_50' },
+            { label: '₹50 - ₹100', value: 'between_50_100' },
+            { label: '₹100+', value: 'over_100' },
+          ]}
+        />
+
+        <FilterGroup
+          title="Time Window"
+          name="time-window"
+          value={draftFilters.timeWindow}
+          onChange={(value) => setDraftFilters((prev) => ({ ...prev, timeWindow: value }))}
+          options={[
+            { label: 'Any', value: 'any' },
+            { label: 'Morning', value: 'morning' },
+            { label: 'Afternoon', value: 'afternoon' },
+            { label: 'Evening', value: 'evening' },
+            { label: 'Night', value: 'night' },
+          ]}
+        />
+
+        <FilterGroup
+          title="Sort By"
+          name="sort"
+          value={draftFilters.sortUi}
+          onChange={(value) => setDraftFilters((prev) => ({ ...prev, sortUi: value }))}
+          options={[
+            { label: 'Recommended', value: 'recommended' },
+            { label: 'Earliest', value: 'earliest' },
+            { label: 'Lowest Price', value: 'lowest_price' },
+            { label: 'Most Seats', value: 'most_seats' },
+          ]}
+        />
+      </div>
+
+      <div className="mt-6 grid gap-2">
+        <button type="button" onClick={clearAppliedFilters} className="rounded-xl border border-slate-300 px-4 py-2.5 text-sm font-bold text-slate-700 hover:bg-slate-50">
+          Clear Filters
+        </button>
+        <button type="button" onClick={applyFiltersAndSearch} disabled={loading} className="rounded-xl bg-blue-600 px-4 py-2.5 text-sm font-bold text-white hover:bg-blue-700 disabled:opacity-60">
+          Apply Filters
+        </button>
+      </div>
+    </div>
+  );
+
   return (
     <main className="min-h-screen bg-slate-50 px-4 py-8 md:px-8">
       <section className="mx-auto max-w-7xl">
-        <div className="mb-8">
-          <p className="font-semibold text-emerald-600">Find rides</p>
-          <h1 className="mt-1 text-3xl font-black text-slate-900 md:text-5xl">
-            Search available rides
-          </h1>
-        </div>
+        <form onSubmit={handleSubmit} className="relative z-20 mb-6 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+          <h1 className="mb-4 text-2xl font-black text-slate-900">Find a Ride</h1>
 
-        <form
-          onSubmit={handleSubmit}
-          className="mb-8 grid gap-4 rounded-3xl bg-white p-5 shadow-sm ring-1 ring-slate-200 md:grid-cols-2 lg:grid-cols-4"
-        >
-          <LocationSearch
-            label="From"
-            value={from}
-            onChange={setFrom}
-            placeholder="Source location"
-            disabled={loading}
-            closeSignal={closeSuggestionsSignal}
-            isActive={activeLocationDropdown === 'from'}
-            onActivate={() => setActiveLocationDropdown('from')}
-            onCloseAll={() => setActiveLocationDropdown(null)}
-          />
-
-          <LocationSearch
-            label="To"
-            value={to}
-            onChange={setTo}
-            placeholder="Destination location"
-            disabled={loading}
-            closeSignal={closeSuggestionsSignal}
-            isActive={activeLocationDropdown === 'to'}
-            onActivate={() => setActiveLocationDropdown('to')}
-            onCloseAll={() => setActiveLocationDropdown(null)}
-          />
-
-          <div>
-            <label className="mb-2 block text-sm font-semibold text-slate-700">
-              Date/Time
-            </label>
-            <input
-              type="datetime-local"
-              value={dateTime}
+          <div className="grid gap-3 md:grid-cols-2 lg:grid-cols-[1fr_1fr_180px_160px_120px_110px]">
+            <LocationSearch
+              label="From"
+              value={from}
+              onChange={setFrom}
+              placeholder="Source location"
               disabled={loading}
-              onChange={(e) => setDateTime(e.target.value)}
-              className="w-full rounded-xl border border-slate-300 px-4 py-3 outline-none transition focus:border-emerald-500 focus:ring-2 focus:ring-emerald-100 disabled:cursor-not-allowed disabled:opacity-60"
+              closeSignal={closeSuggestionsSignal}
+              isActive={activeLocationDropdown === 'from'}
+              onActivate={() => setActiveLocationDropdown('from')}
+              onCloseAll={() => setActiveLocationDropdown(null)}
             />
-          </div>
 
-          <div>
-            <label className="mb-2 block text-sm font-semibold text-slate-700">
-              Vehicle Type
-            </label>
-            <select
-              value={vehicleType}
+            <LocationSearch
+              label="To"
+              value={to}
+              onChange={setTo}
+              placeholder="Destination location"
               disabled={loading}
-              onChange={(e) => setVehicleType(e.target.value)}
-              className="w-full rounded-xl border border-slate-300 px-4 py-3 outline-none transition focus:border-emerald-500 focus:ring-2 focus:ring-emerald-100 disabled:cursor-not-allowed disabled:opacity-60"
-            >
-              <option value="">Any</option>
-              <option value="bike">Bike</option>
-              <option value="car">Car</option>
-              <option value="auto">Auto</option>
-              <option value="van">Van</option>
-            </select>
-          </div>
-
-          <div>
-            <label className="mb-2 block text-sm font-semibold text-slate-700">
-              Min Price
-            </label>
-            <input
-              type="number"
-              min="0"
-              value={minPrice}
-              disabled={loading}
-              onChange={(e) => setMinPrice(e.target.value)}
-              className="w-full rounded-xl border border-slate-300 px-4 py-3 outline-none transition focus:border-emerald-500 focus:ring-2 focus:ring-emerald-100 disabled:cursor-not-allowed disabled:opacity-60"
-              placeholder="Any"
+              closeSignal={closeSuggestionsSignal}
+              isActive={activeLocationDropdown === 'to'}
+              onActivate={() => setActiveLocationDropdown('to')}
+              onCloseAll={() => setActiveLocationDropdown(null)}
             />
-          </div>
 
-          <div>
-            <label className="mb-2 block text-sm font-semibold text-slate-700">
-              Max Price
-            </label>
-            <input
-              type="number"
-              min="0"
-              value={maxPrice}
-              disabled={loading}
-              onChange={(e) => setMaxPrice(e.target.value)}
-              className="w-full rounded-xl border border-slate-300 px-4 py-3 outline-none transition focus:border-emerald-500 focus:ring-2 focus:ring-emerald-100 disabled:cursor-not-allowed disabled:opacity-60"
-              placeholder="Any"
-            />
-          </div>
-
-          <div>
-            <label className="mb-2 block text-sm font-semibold text-slate-700">
-              Available Seats
-            </label>
-            <select
-              value={seats}
-              disabled={loading}
-              onChange={(e) => setSeats(e.target.value)}
-              className="w-full rounded-xl border border-slate-300 px-4 py-3 outline-none transition focus:border-emerald-500 focus:ring-2 focus:ring-emerald-100 disabled:cursor-not-allowed disabled:opacity-60"
-            >
-              <option value="">Any</option>
-              <option value="1">1+</option>
-              <option value="2">2+</option>
-              <option value="3">3+</option>
-              <option value="4">4+</option>
-            </select>
-          </div>
-
-          <div>
-            <label className="mb-2 block text-sm font-semibold text-slate-700">
-              Sort
-            </label>
-            <select
-              value={sort}
-              disabled={loading}
-              onChange={(e) => setSort(e.target.value)}
-              className="w-full rounded-xl border border-slate-300 px-4 py-3 outline-none transition focus:border-emerald-500 focus:ring-2 focus:ring-emerald-100 disabled:cursor-not-allowed disabled:opacity-60"
-            >
-              <option value="departure_time">Departure Time</option>
-              <option value="nearest">Nearest</option>
-              <option value="price_low">Price Low</option>
-              <option value="price_high">Price High</option>
-              <option value="newest">Newest</option>
-            </select>
-          </div>
-
-          <div className="lg:col-span-2">
-            <label className="mb-2 block text-sm font-semibold text-slate-700">
-              Distance Near Me (km)
-            </label>
-            <div className="flex gap-2">
+            <div>
+              <label className="mb-2 block text-sm font-semibold text-slate-700">Date</label>
               <input
-                type="number"
-                min="1"
-                value={radiusKm}
+                type="date"
+                value={dateTime ? dateTime.slice(0, 10) : ''}
                 disabled={loading}
-                onChange={(e) => setRadiusKm(e.target.value)}
-                className="w-full rounded-xl border border-slate-300 px-4 py-3 outline-none transition focus:border-emerald-500 focus:ring-2 focus:ring-emerald-100 disabled:cursor-not-allowed disabled:opacity-60"
-                placeholder="Any"
+                onChange={(e) => {
+                  const date = e.target.value;
+                  const existingTime = dateTime && dateTime.includes('T') ? dateTime.split('T')[1] : '12:00';
+                  setDateTime(date ? `${date}T${existingTime.slice(0, 5)}` : '');
+                }}
+                className="w-full rounded-xl border border-slate-300 px-4 py-3 outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-100 disabled:cursor-not-allowed disabled:opacity-60"
               />
-              <button
-                type="button"
-                onClick={useCurrentLocation}
-                disabled={locating || loading}
-                className="whitespace-nowrap rounded-xl border border-slate-300 px-4 py-3 text-sm font-bold text-slate-700 transition hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-60"
-              >
-                <span className="inline-flex items-center gap-2">
-                  <LocateFixed size={16} />
-                  {locating ? 'Locating...' : 'Use my location'}
-                </span>
-              </button>
             </div>
-          </div>
 
-          <div className="lg:col-span-4 rounded-2xl border border-slate-200 bg-slate-50 p-4">
-            <p className="mb-3 text-sm font-black text-slate-700">Safety & Comfort Filters</p>
-            <div className="grid gap-3 md:grid-cols-3 lg:grid-cols-4">
-              {[
-                ['womenOnly', 'Women-only'],
-                ['verifiedOnly', 'Verified-only'],
-                ['smokingAllowed', 'Smoking allowed'],
-                ['musicAllowed', 'Music allowed'],
-                ['petsAllowed', 'Pets allowed'],
-                ['acAvailable', 'AC available'],
-              ].map(([key, label]) => (
-                <label key={key} className="flex items-center justify-between rounded-xl bg-white px-3 py-2 text-sm font-semibold">
-                  <span>{label}</span>
-                  <input
-                    type="checkbox"
-                    checked={Boolean(preferenceFilters[key])}
-                    disabled={loading}
-                    onChange={(e) => setPreferenceFilters((prev) => ({ ...prev, [key]: e.target.checked }))}
-                    className="h-4 w-4 accent-emerald-600"
-                  />
-                </label>
-              ))}
-              <select
-                value={preferenceFilters.genderPreference}
+            <div>
+              <label className="mb-2 block text-sm font-semibold text-slate-700">Time</label>
+              <input
+                type="time"
+                value={dateTime && dateTime.includes('T') ? dateTime.split('T')[1].slice(0, 5) : ''}
                 disabled={loading}
-                onChange={(e) => setPreferenceFilters((prev) => ({ ...prev, genderPreference: e.target.value }))}
-                className="rounded-xl border border-slate-300 px-3 py-2 text-sm font-semibold outline-none disabled:cursor-not-allowed disabled:opacity-60"
-              >
-                <option value="">Any gender preference</option>
-                <option value="male">Male preference</option>
-                <option value="female">Female preference</option>
-              </select>
+                onChange={(e) => {
+                  const time = e.target.value;
+                  const existingDate = dateTime ? dateTime.slice(0, 10) : '';
+                  setDateTime(existingDate && time ? `${existingDate}T${time}` : existingDate ? `${existingDate}T12:00` : '');
+                }}
+                className="w-full rounded-xl border border-slate-300 px-4 py-3 outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-100 disabled:cursor-not-allowed disabled:opacity-60"
+              />
             </div>
-          </div>
 
-          <div className="lg:col-span-2 flex items-end">
-            <button
-              type="submit"
-              disabled={loading}
-              className="flex w-full items-center justify-center gap-2 rounded-2xl bg-slate-950 px-5 py-3 font-bold text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-60"
-            >
-              <Search size={18} />
-              {loading ? 'Searching rides...' : 'Search Rides'}
+            <button type="submit" disabled={loading} className="mt-7 inline-flex items-center justify-center gap-2 rounded-xl bg-blue-600 px-4 py-3 text-sm font-bold text-white hover:bg-blue-700 disabled:opacity-60">
+              <Search size={16} />
+              Search
+            </button>
+
+            <button type="button" onClick={handleClearSearch} disabled={loading} className="mt-7 inline-flex items-center justify-center gap-2 rounded-xl border border-slate-300 bg-white px-4 py-3 text-sm font-bold text-slate-700 hover:bg-slate-50 disabled:opacity-60">
+              <X size={16} />
+              Clear
             </button>
           </div>
         </form>
@@ -1108,37 +1095,81 @@ const FindRide = () => {
           </div>
         ) : null}
 
-        {nearbyMode ? (
-          <p className="mb-6 text-sm font-bold text-emerald-700">
-            Near you {nearbyCount} rides available
-          </p>
-        ) : null}
+        <div className="grid items-start gap-6 lg:grid-cols-[280px_1fr]">
+          <aside className="hidden lg:sticky lg:top-24 lg:block lg:self-start">{FiltersPanel}</aside>
 
-        {loading ? (
-          <div className="rounded-3xl bg-white p-10 text-center text-slate-600 shadow-sm ring-1 ring-slate-200">
-            Searching rides...
+          <div>
+            <div className="mb-4 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+              <div className="flex items-center justify-between gap-3">
+                <p className="text-base font-black text-slate-900">
+                  {loading ? 'Searching rides...' : displayedRides.length ? `${displayedRides.length} rides found` : 'No rides found'}
+                </p>
+                <button
+                  type="button"
+                  onClick={() => setMobileFiltersOpen(true)}
+                  className="inline-flex items-center gap-2 rounded-xl border border-slate-300 px-3 py-2 text-sm font-semibold text-slate-700 lg:hidden"
+                >
+                  <SlidersHorizontal size={16} />
+                  Filters
+                </button>
+              </div>
+
+              {activeFilterChips.length > 0 ? (
+                <div className="mt-3 flex flex-wrap gap-2">
+                  {activeFilterChips.map((chip) => (
+                    <button
+                      type="button"
+                      key={chip.key}
+                      onClick={() => removeChip(chip.key)}
+                      className="inline-flex items-center gap-1 rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold text-slate-700"
+                    >
+                      {chip.label}
+                      <X size={12} />
+                    </button>
+                  ))}
+                </div>
+              ) : null}
+            </div>
+
+            {nearbyMode ? <p className="mb-6 text-sm font-bold text-emerald-700">Near you {nearbyCount} rides available</p> : null}
+
+            {loading ? (
+              <div className="rounded-2xl bg-white p-10 text-center text-slate-600 shadow-sm ring-1 ring-slate-200">Searching rides...</div>
+            ) : searchError ? (
+              <ErrorState message={searchError} onRetry={handleRetry} />
+            ) : displayedRides.length ? (
+              <div className="grid gap-5 md:grid-cols-2 xl:grid-cols-2">
+                {displayedRides.map((ride) => (
+                  <RideCard key={ride._id} ride={ride} currentUserId={currentUserId} />
+                ))}
+              </div>
+            ) : (
+              <EmptyState
+                title="No rides found"
+                message={
+                  nearbyMode
+                    ? 'No rides found near you. Try increasing distance or changing location.'
+                    : meaningfulSearchExists
+                      ? 'No rides found for your search. Try broadening filters.'
+                      : 'No rides available right now. Try searching by source and destination.'
+                }
+              />
+            )}
           </div>
-        ) : searchError ? (
-          <ErrorState message={searchError} onRetry={handleRetry} />
-        ) : rides.length ? (
-          <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
-            {rides.map((ride) => (
-              <RideCard key={ride._id} ride={ride} currentUserId={currentUserId} />
-            ))}
-          </div>
-        ) : (
-          <EmptyState
-            title="No rides found"
-            message={
-              nearbyMode
-                ? 'No rides found near you. Try increasing distance or changing location.'
-                : meaningfulSearchExists
-                  ? 'No rides found for your search. Try broadening filters.'
-                  : 'No rides available right now. Try searching by source and destination.'
-            }
-          />
-        )}
+        </div>
       </section>
+
+      {mobileFiltersOpen ? (
+        <div className="fixed inset-0 z-40 bg-black/40 lg:hidden" onClick={() => setMobileFiltersOpen(false)}>
+          <div className="absolute bottom-0 left-0 right-0 max-h-[85vh] overflow-y-auto rounded-t-2xl bg-white p-4" onClick={(e) => e.stopPropagation()}>
+            <div className="mb-4 flex items-center justify-between">
+              <h2 className="text-lg font-black text-slate-900">Filters</h2>
+              <button type="button" onClick={() => setMobileFiltersOpen(false)} className="rounded-lg p-2 text-slate-500 hover:bg-slate-100"><X size={18} /></button>
+            </div>
+            {FiltersPanel}
+          </div>
+        </div>
+      ) : null}
     </main>
   );
 };

@@ -237,6 +237,12 @@ export const listRides = async (req, res, next) => {
     if (req.query.lat) filters.lat = req.query.lat;
     if (req.query.lng) filters.lng = req.query.lng;
     if (req.query.radiusKm) filters.radiusKm = req.query.radiusKm;
+    if (req.query.fromLat || req.query.sourceLat) filters.fromLat = req.query.fromLat || req.query.sourceLat;
+    if (req.query.fromLng || req.query.sourceLng) filters.fromLng = req.query.fromLng || req.query.sourceLng;
+    if (req.query.toLat || req.query.destinationLat) filters.toLat = req.query.toLat || req.query.destinationLat;
+    if (req.query.toLng || req.query.destinationLng) filters.toLng = req.query.toLng || req.query.destinationLng;
+    if (req.query.sourceRadiusKm) filters.sourceRadiusKm = req.query.sourceRadiusKm;
+    if (req.query.destinationRadiusKm) filters.destinationRadiusKm = req.query.destinationRadiusKm;
 
     const sortBy = req.query.sort || req.query.sortBy || 'departure_time';
 
@@ -274,6 +280,12 @@ export const searchRides = async (req, res, next) => {
       minPrice: req.query.minPrice,
       maxPrice: req.query.maxPrice,
       minSeats: req.query.minSeats || req.query.seats,
+      fromLat: req.query.fromLat || req.query.sourceLat,
+      fromLng: req.query.fromLng || req.query.sourceLng,
+      toLat: req.query.toLat || req.query.destinationLat,
+      toLng: req.query.toLng || req.query.destinationLng,
+      sourceRadiusKm: req.query.sourceRadiusKm,
+      destinationRadiusKm: req.query.destinationRadiusKm,
       page,
       limit,
     });

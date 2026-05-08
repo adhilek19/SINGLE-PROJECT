@@ -51,6 +51,14 @@ export const rideRequestRepository = {
     });
   },
 
+  findAcceptedOrCompletedByRideAndPassenger({ rideId, passengerId }) {
+    return RideRequest.findOne({
+      ride: rideId,
+      passenger: passengerId,
+      status: { $in: ['accepted', 'completed'] },
+    }).select('_id');
+  },
+
   save(request) {
     return request.save();
   },

@@ -153,6 +153,14 @@ function App() {
                 </LazyPage>
               }
             />
+            <Route
+              path="/profile/:id"
+              element={
+                <LazyPage>
+                  <PublicProfile />
+                </LazyPage>
+              }
+            />
 
             <Route
               path="/profile"

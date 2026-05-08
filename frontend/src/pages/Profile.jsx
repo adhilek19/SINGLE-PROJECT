@@ -78,7 +78,6 @@ const Profile = () => {
     profilePic: '',
     currentLocation: null,
     trustedContact: { name: '', phone: '', relationship: '' },
-    verification: { phone: false, id: false, profilePhoto: false, vehicle: false },
     safetyPreferences: {
       womenOnlyRides: false,
       verifiedOnlyRides: false,
@@ -98,6 +97,7 @@ const Profile = () => {
     rideCount: 0,
     email: '',
     isVerified: false,
+    idVerified: false,
   });
 
   const syncUser = (user) => {
@@ -142,12 +142,6 @@ const Profile = () => {
             phone: user?.trustedContact?.phone || '',
             relationship: user?.trustedContact?.relationship || '',
           },
-          verification: {
-            phone: Boolean(user?.verification?.phone || user?.phone),
-            id: Boolean(user?.verification?.id),
-            profilePhoto: Boolean(user?.verification?.profilePhoto || user?.profilePic),
-            vehicle: Boolean(user?.verification?.vehicle),
-          },
           safetyPreferences: {
             womenOnlyRides: Boolean(user?.safetyPreferences?.womenOnlyRides),
             verifiedOnlyRides: Boolean(user?.safetyPreferences?.verifiedOnlyRides),
@@ -167,6 +161,7 @@ const Profile = () => {
           rideCount: user?.rideCount || 0,
           email: user?.email || '',
           isVerified: Boolean(user?.isVerified),
+          idVerified: Boolean(user?.verification?.id),
         });
 
       syncUser(user);
@@ -230,7 +225,6 @@ const Profile = () => {
         bio: form.bio,
         profilePic: form.profilePic,
         trustedContact: form.trustedContact,
-        verification: form.verification,
         safetyPreferences: form.safetyPreferences,
         ...(vehicle.type || vehicle.model || vehicle.number || vehicle.image ? { vehicle } : {}),
       };
@@ -292,6 +286,13 @@ const Profile = () => {
     );
   }
 
+  const hasPhone = Boolean(String(form.phone || '').trim());
+  const hasProfilePhoto = Boolean(String(form.profilePic || '').trim());
+  const hasVehicleProof = Boolean(
+    String(form.vehicle?.number || '').trim() &&
+      (String(form.vehicle?.model || '').trim() || String(form.vehicle?.image || '').trim())
+  );
+
   return (
     <div className="flex-grow bg-slate-50 py-6 md:py-10 px-4">
       <div className="max-w-4xl mx-auto">
@@ -326,16 +327,10 @@ const Profile = () => {
               <h2 className="text-xl font-bold mb-4">Verification Badges</h2>
               <div className="flex flex-wrap gap-2">
                 <Badge active={stats.isVerified}>Email verified</Badge>
-                <Badge active={form.verification.phone}>Phone verified</Badge>
-                <Badge active={form.verification.id}>ID verified</Badge>
-                <Badge active={form.verification.profilePhoto}>Profile photo added</Badge>
-                <Badge active={form.verification.vehicle}>Vehicle verified</Badge>
-              </div>
-              <div className="grid md:grid-cols-2 gap-3 mt-4">
-                <Toggle label="Mark phone verified" checked={form.verification.phone} onChange={(v) => setNestedBoolean('verification', 'phone', v)} />
-                <Toggle label="Mark ID verified" checked={form.verification.id} onChange={(v) => setNestedBoolean('verification', 'id', v)} />
-                <Toggle label="Mark vehicle verified" checked={form.verification.vehicle} onChange={(v) => setNestedBoolean('verification', 'vehicle', v)} />
-                <Toggle label="Profile photo added" checked={form.verification.profilePhoto} onChange={(v) => setNestedBoolean('verification', 'profilePhoto', v)} />
+                <Badge active={hasPhone}>Phone added</Badge>
+                <Badge active={stats.idVerified}>ID verified</Badge>
+                <Badge active={hasProfilePhoto}>Profile photo added</Badge>
+                <Badge active={hasVehicleProof}>Vehicle proof added</Badge>
               </div>
             </section>
 

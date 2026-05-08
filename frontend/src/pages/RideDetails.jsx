@@ -105,7 +105,7 @@ const ProfileLink = ({ user, fallback = 'User', className = '' }) => {
   if (!id) return <span className={className}>{name}</span>;
 
   return (
-    <Link to={`/users/${id}`} className={`font-black text-blue-700 hover:text-blue-900 ${className}`}>
+    <Link to={`/profile/${id}`} className={`font-black text-blue-700 hover:text-blue-900 ${className}`}>
       {name}
     </Link>
   );
@@ -200,12 +200,27 @@ const RideDetails = () => {
   const liveLocations = useMemo(() => Object.values(liveLocationsByUser || {}), [liveLocationsByUser]);
   const shareUrl = ride?.shareToken ? `${window.location.origin}/track/${ride.shareToken}` : '';
   const rideReviews = ride?.reviewDetails || [];
-  const passengerTargets = (ride?.passengers || [])
-    .map((p) => ({
-      id: toId(p.user),
-      name: p.user?.name || 'Passenger',
-    }))
-    .filter((p) => Boolean(p.id));
+  const passengerTargets = useMemo(() => {
+    const targetMap = new Map();
+
+    (ride?.passengers || []).forEach((p) => {
+      const idValue = toId(p.user);
+      if (!idValue) return;
+      const name = p.user?.name || 'Passenger';
+      targetMap.set(idValue, { id: idValue, name });
+    });
+
+    (rideRequests || [])
+      .filter((req) => ['accepted', 'completed'].includes(req.status))
+      .forEach((req) => {
+        const idValue = toId(req.passenger);
+        if (!idValue) return;
+        const name = req.passenger?.name || targetMap.get(idValue)?.name || 'Passenger';
+        targetMap.set(idValue, { id: idValue, name });
+      });
+
+    return Array.from(targetMap.values());
+  }, [ride?.passengers, rideRequests]);
 
   const isRideActionClosed = ['completed', 'cancelled'].includes(ride?.status);
   const isPastScheduled =

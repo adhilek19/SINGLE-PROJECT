@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import L from 'leaflet';
 import {
   MapContainer,
@@ -129,6 +129,16 @@ const getLocationUser = (loc = {}) => {
   };
 };
 
+const getLocationKey = (loc = {}) => {
+  const user = loc.user && typeof loc.user === 'object' ? loc.user : {};
+  return (
+    loc.userId ||
+    user._id ||
+    loc.user ||
+    `${loc.role || 'user'}-${loc.name || ''}`
+  );
+};
+
 const getInitials = (name = 'User') =>
   String(name)
     .trim()
@@ -173,7 +183,7 @@ const LiveLocationMarkers = ({ locations = [] }) => {
 
         return (
           <Marker
-            key={`${user.id}-${role}-${loc.updatedAt || ''}`}
+            key={`${user.id}-${role}`}
             position={[Number(loc.lat), Number(loc.lng)]}
             icon={createUserPhotoIcon({ photo: user.photo, name: user.name, role, speedText })}
           >
@@ -206,6 +216,12 @@ const RouteMap = ({ source, destination, liveLocations = [], height = '360px' })
   const [distanceKm, setDistanceKm] = useState(null);
   const [durationText, setDurationText] = useState('');
   const [loading, setLoading] = useState(false);
+  const [smoothedLiveLocations, setSmoothedLiveLocations] = useState([]);
+  const [liveRouteCoords, setLiveRouteCoords] = useState([]);
+  const [liveDistanceKm, setLiveDistanceKm] = useState(null);
+  const [liveEtaText, setLiveEtaText] = useState('');
+  const liveLocationMapRef = useRef(new Map());
+  const liveAnimationFrameRef = useRef(new Map());
 
   const isValid = isValidLocation(source) && isValidLocation(destination);
 
@@ -217,6 +233,148 @@ const RouteMap = ({ source, destination, liveLocations = [], height = '360px' })
       (Number(source.lng) + Number(destination.lng)) / 2,
     ];
   }, [isValid, source, destination]);
+
+  useEffect(
+    () => () => {
+      liveAnimationFrameRef.current.forEach((frameId) =>
+        cancelAnimationFrame(frameId)
+      );
+      liveAnimationFrameRef.current.clear();
+    },
+    []
+  );
+
+  useEffect(() => {
+    const validIncoming = liveLocations
+      .filter(isValidLocation)
+      .map((loc) => ({
+        ...loc,
+        _locationKey: getLocationKey(loc),
+      }));
+
+    const incomingKeys = new Set(validIncoming.map((loc) => loc._locationKey));
+
+    // Remove users that are no longer present in incoming live data.
+    Array.from(liveLocationMapRef.current.keys()).forEach((key) => {
+      if (!incomingKeys.has(key)) {
+        const activeFrame = liveAnimationFrameRef.current.get(key);
+        if (activeFrame) cancelAnimationFrame(activeFrame);
+        liveAnimationFrameRef.current.delete(key);
+        liveLocationMapRef.current.delete(key);
+      }
+    });
+
+    validIncoming.forEach((incoming) => {
+      const key = incoming._locationKey;
+      const previous = liveLocationMapRef.current.get(key);
+      const targetLat = Number(incoming.lat);
+      const targetLng = Number(incoming.lng);
+
+      if (!previous || !isValidLocation(previous)) {
+        liveLocationMapRef.current.set(key, incoming);
+        return;
+      }
+
+      const startLat = Number(previous.lat);
+      const startLng = Number(previous.lng);
+      const hasMoved =
+        Math.abs(targetLat - startLat) > 0.00001 ||
+        Math.abs(targetLng - startLng) > 0.00001;
+
+      if (!hasMoved) {
+        liveLocationMapRef.current.set(key, { ...previous, ...incoming });
+        return;
+      }
+
+      const runningFrame = liveAnimationFrameRef.current.get(key);
+      if (runningFrame) {
+        cancelAnimationFrame(runningFrame);
+        liveAnimationFrameRef.current.delete(key);
+      }
+
+      const durationMs = 900;
+      const startedAt = performance.now();
+
+      const animate = (now) => {
+        const progress = Math.min(1, (now - startedAt) / durationMs);
+        const eased =
+          progress < 0.5
+            ? 2 * progress * progress
+            : 1 - ((-2 * progress + 2) ** 2) / 2;
+
+        const nextLat = startLat + (targetLat - startLat) * eased;
+        const nextLng = startLng + (targetLng - startLng) * eased;
+
+        liveLocationMapRef.current.set(key, {
+          ...incoming,
+          lat: nextLat,
+          lng: nextLng,
+        });
+        setSmoothedLiveLocations(Array.from(liveLocationMapRef.current.values()));
+
+        if (progress < 1) {
+          const frameId = requestAnimationFrame(animate);
+          liveAnimationFrameRef.current.set(key, frameId);
+        } else {
+          liveAnimationFrameRef.current.delete(key);
+        }
+      };
+
+      const frameId = requestAnimationFrame(animate);
+      liveAnimationFrameRef.current.set(key, frameId);
+    });
+
+    setSmoothedLiveLocations(Array.from(liveLocationMapRef.current.values()));
+  }, [liveLocations]);
+
+  const driverLiveLocation = useMemo(
+    () => smoothedLiveLocations.find((loc) => loc.role === 'driver'),
+    [smoothedLiveLocations]
+  );
+
+  useEffect(() => {
+    if (!isValid || !isValidLocation(driverLiveLocation)) {
+      setLiveRouteCoords([]);
+      setLiveDistanceKm(null);
+      setLiveEtaText('');
+      return undefined;
+    }
+
+    const controller = new AbortController();
+    const timer = window.setTimeout(async () => {
+      try {
+        const srcLng = Number(driverLiveLocation.lng);
+        const srcLat = Number(driverLiveLocation.lat);
+        const destLng = Number(destination.lng);
+        const destLat = Number(destination.lat);
+
+        const url = `https://router.project-osrm.org/route/v1/driving/${srcLng},${srcLat};${destLng},${destLat}?overview=full&geometries=polyline`;
+        const res = await fetch(url, { signal: controller.signal });
+        const data = await res.json();
+        const route = data?.routes?.[0];
+
+        if (!route) {
+          setLiveRouteCoords([]);
+          setLiveDistanceKm(null);
+          setLiveEtaText('');
+          return;
+        }
+
+        setLiveRouteCoords(decodePolyline(route.geometry));
+        setLiveDistanceKm((route.distance / 1000).toFixed(1));
+        setLiveEtaText(formatDuration(route.duration));
+      } catch {
+        setLiveRouteCoords([]);
+        setLiveDistanceKm(null);
+        setLiveEtaText('');
+      }
+    }, 200);
+
+    return () => {
+      controller.abort();
+      window.clearTimeout(timer);
+    };
+  }, [driverLiveLocation, destination, isValid]);
 
   useEffect(() => {
     const fetchRoute = async () => {
@@ -285,17 +443,23 @@ const RouteMap = ({ source, destination, liveLocations = [], height = '360px' })
           </h3>
 
           <p className="text-sm text-slate-500">
-            {loading ? 'Calculating route...' : 'Source, destination, live profile markers and speed'}
+            {loading
+              ? 'Calculating route...'
+              : 'Source, destination, live route, profile markers and speed'}
           </p>
         </div>
 
         <div className="flex gap-2 text-xs font-bold">
           <span className="px-3 py-1.5 rounded-full bg-blue-50 text-blue-700">
-            {distanceKm ? `${distanceKm} km` : 'Distance N/A'}
+            {liveDistanceKm
+              ? `${liveDistanceKm} km remaining`
+              : distanceKm
+                ? `${distanceKm} km`
+                : 'Distance N/A'}
           </span>
 
           <span className="px-3 py-1.5 rounded-full bg-emerald-50 text-emerald-700">
-            {durationText || 'ETA N/A'}
+            {liveEtaText ? `ETA ${liveEtaText}` : durationText || 'ETA N/A'}
           </span>
         </div>
       </div>
@@ -312,7 +476,11 @@ const RouteMap = ({ source, destination, liveLocations = [], height = '360px' })
             url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
           />
 
-          <FitBounds source={source} destination={destination} liveLocations={liveLocations} />
+          <FitBounds
+            source={source}
+            destination={destination}
+            liveLocations={smoothedLiveLocations}
+          />
 
           <CircleMarker
             center={[Number(source.lat), Number(source.lng)]}
@@ -357,8 +525,20 @@ const RouteMap = ({ source, destination, liveLocations = [], height = '360px' })
             />
           )}
 
-          {liveLocations.some(isValidLocation) && (
-            <LiveLocationMarkers locations={liveLocations} />
+          {liveRouteCoords.length > 0 && (
+            <Polyline
+              positions={liveRouteCoords}
+              pathOptions={{
+                color: '#10b981',
+                weight: 4,
+                opacity: 0.95,
+                dashArray: '8 8',
+              }}
+            />
+          )}
+
+          {smoothedLiveLocations.some(isValidLocation) && (
+            <LiveLocationMarkers locations={smoothedLiveLocations} />
           )}
         </MapContainer>
       </div>

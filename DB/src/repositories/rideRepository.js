@@ -3,6 +3,70 @@ import Ride from '../models/Ride.js';
 
 const toObjectId = (id) => new mongoose.Types.ObjectId(id);
 
+const EARTH_RADIUS_KM = 6378.1;
+const DEFAULT_SOURCE_RADIUS_KM = 25;
+const DEFAULT_DESTINATION_RADIUS_KM = 35;
+
+const escapeRegex = (value = '') => String(value).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+const normalizeSearchText = (value = '') =>
+  String(value || '')
+    .toLowerCase()
+    .replace(/[^a-z0-9\s]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+
+const buildLooseRegex = (value = '') => {
+  const normalized = normalizeSearchText(value);
+  if (!normalized) return null;
+
+  const compact = normalized.replace(/\s+/g, '');
+  if (compact.length >= 3 && compact.length <= 40) {
+    return compact.split('').map(escapeRegex).join('[\\s\\S]*');
+  }
+
+  return escapeRegex(normalized);
+};
+
+const buildTextCondition = (field, value) => {
+  const normalized = normalizeSearchText(value);
+  if (!normalized) return null;
+
+  const escaped = escapeRegex(normalized);
+  const loose = buildLooseRegex(normalized);
+
+  return {
+    $or: [
+      { [field]: { $regex: escaped, $options: 'i' } },
+      ...(loose && loose !== escaped
+        ? [{ [field]: { $regex: loose, $options: 'i' } }]
+        : []),
+    ],
+  };
+};
+
+const hasValidLatLng = (lat, lng) =>
+  Number.isFinite(Number(lat)) &&
+  Number.isFinite(Number(lng)) &&
+  Math.abs(Number(lat)) <= 90 &&
+  Math.abs(Number(lng)) <= 180;
+
+const addGeoWithinCircle = (match, field, lat, lng, radiusKm) => {
+  if (!hasValidLatLng(lat, lng)) return;
+
+  const safeRadiusKm = Math.min(
+    100,
+    Math.max(1, Number(radiusKm) || DEFAULT_DESTINATION_RADIUS_KM)
+  );
+
+  match[field] = {
+    $geoWithin: {
+      $centerSphere: [[Number(lng), Number(lat)], safeRadiusKm / EARTH_RADIUS_KM],
+    },
+  };
+};
+
+
 const lookupDriver = [
   {
     $lookup: {
@@ -179,18 +243,38 @@ const buildListMatch = (filters = {}) => {
     match.status = filters.status;
   }
 
-  if (filters.sourceText) {
-    match['source.name'] = {
-      $regex: filters.sourceText,
-      $options: 'i',
-    };
+  const hasSourceCoords = hasValidLatLng(
+    filters.fromLat ?? filters.sourceLat ?? filters.lat,
+    filters.fromLng ?? filters.sourceLng ?? filters.lng
+  );
+  const hasDestinationCoords = hasValidLatLng(
+    filters.toLat ?? filters.destinationLat,
+    filters.toLng ?? filters.destinationLng
+  );
+  const textConditions = [];
+
+  if (filters.sourceText && !hasSourceCoords) {
+    const condition = buildTextCondition('source.name', filters.sourceText);
+    if (condition) textConditions.push(condition);
   }
 
-  if (filters.destinationText) {
-    match['destination.name'] = {
-      $regex: filters.destinationText,
-      $options: 'i',
-    };
+  if (filters.destinationText && !hasDestinationCoords) {
+    const condition = buildTextCondition('destination.name', filters.destinationText);
+    if (condition) textConditions.push(condition);
+  }
+
+  if (textConditions.length) {
+    match.$and = [...(match.$and || []), ...textConditions];
+  }
+
+  if (hasDestinationCoords) {
+    addGeoWithinCircle(
+      match,
+      'destinationPoint',
+      filters.toLat ?? filters.destinationLat,
+      filters.toLng ?? filters.destinationLng,
+      filters.destinationRadiusKm ?? filters.routeRadiusKm ?? DEFAULT_DESTINATION_RADIUS_KM
+    );
   }
 
   if (filters.date) {
@@ -315,10 +399,10 @@ const listPaginated = async ({
   const skip = (pageNum - 1) * limitNum;
 
   const match = buildListMatch(filters);
-  const lat = Number(filters.lat);
-  const lng = Number(filters.lng);
-  const hasGeo = Number.isFinite(lat) && Number.isFinite(lng);
-  const radiusKm = Number(filters.radiusKm);
+  const sourceLat = Number(filters.fromLat ?? filters.sourceLat ?? filters.lat);
+  const sourceLng = Number(filters.fromLng ?? filters.sourceLng ?? filters.lng);
+  const hasGeo = hasValidLatLng(sourceLat, sourceLng);
+  const radiusKm = Number(filters.sourceRadiusKm ?? filters.radiusKm ?? DEFAULT_SOURCE_RADIUS_KM);
   const hasRadius = Number.isFinite(radiusKm) && radiusKm > 0;
 
   const pipeline = [];
@@ -328,7 +412,7 @@ const listPaginated = async ({
       $geoNear: {
         near: {
           type: 'Point',
-          coordinates: [lng, lat],
+          coordinates: [sourceLng, sourceLat],
         },
         key: 'sourcePoint',
         distanceField: 'distanceMeters',
@@ -398,6 +482,12 @@ const searchRides = async ({
   minPrice,
   maxPrice,
   minSeats,
+  fromLat,
+  fromLng,
+  toLat,
+  toLng,
+  sourceRadiusKm,
+  destinationRadiusKm,
   page = 1,
   limit = 20,
 } = {}) => {
@@ -412,6 +502,16 @@ const searchRides = async ({
   if (minPrice) filters.minPrice = minPrice;
   if (maxPrice) filters.maxPrice = maxPrice;
   if (minSeats) filters.minSeats = minSeats;
+  if (fromLat !== undefined && fromLng !== undefined) {
+    filters.fromLat = fromLat;
+    filters.fromLng = fromLng;
+  }
+  if (toLat !== undefined && toLng !== undefined) {
+    filters.toLat = toLat;
+    filters.toLng = toLng;
+  }
+  if (sourceRadiusKm) filters.sourceRadiusKm = sourceRadiusKm;
+  if (destinationRadiusKm) filters.destinationRadiusKm = destinationRadiusKm;
 
   return listPaginated({
     filters,
