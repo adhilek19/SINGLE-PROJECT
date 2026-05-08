@@ -24,6 +24,7 @@ const envSchema = joi
     // when email delivery fails due provider/network issues. In production keep this false.
     EMAIL_FAIL_OPEN: joi.boolean().truthy('true').falsy('false').optional(),
     EMAIL_LOG_OTP: joi.boolean().truthy('true').falsy('false').optional(),
+    EMAIL_PROVIDER_BLOCK_SECONDS: joi.number().integer().min(30).max(86400).optional(),
 
     GOOGLE_CLIENT_ID: joi.string().required(),
     GOOGLE_CLIENT_SECRET: joi.string().required(),
@@ -53,6 +54,10 @@ if (value.EMAIL_FAIL_OPEN === undefined) {
 
 if (value.EMAIL_LOG_OTP === undefined) {
   value.EMAIL_LOG_OTP = value.NODE_ENV !== 'production';
+}
+
+if (value.EMAIL_PROVIDER_BLOCK_SECONDS === undefined) {
+  value.EMAIL_PROVIDER_BLOCK_SECONDS = 300;
 }
 
 export const env = value;

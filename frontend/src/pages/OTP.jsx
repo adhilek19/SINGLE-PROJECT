@@ -54,7 +54,7 @@ const OTP = () => {
 
       if (newDevOtp) {
         setDevOtp(newDevOtp);
-        toast.success(`SMTP failed. Development OTP: ${newDevOtp}`);
+        toast.success(`Email delivery failed. Development OTP: ${newDevOtp}`);
       } else {
         setDevOtp('');
         toast.success('OTP resent successfully!');
@@ -114,7 +114,7 @@ const OTP = () => {
                 {devOtp}
               </p>
               <p className="mt-1 text-xs text-amber-700">
-                SMTP email failed, so backend returned this OTP for testing. Disable EMAIL_FAIL_OPEN in production.
+                Email delivery failed, so backend returned this OTP for testing. Disable EMAIL_FAIL_OPEN in production.
               </p>
             </div>
           )}

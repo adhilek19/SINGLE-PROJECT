@@ -1,7 +1,11 @@
 import crypto from 'crypto';
 
 import { userRepository } from '../repositories/userRepository.js';
-import { sendOtpEmail, getEmailDebugConfig } from '../utils/email.js';
+import {
+  sendOtpEmail,
+  getEmailDebugConfig,
+  EmailDeliveryError,
+} from '../utils/email.js';
 import { env } from '../config/env.js';
 import {
   generateAccessToken,
@@ -91,6 +95,30 @@ const deliverOtpOrFallback = async ({ email, otp, type }) => {
     return { delivered: true };
   } catch (error) {
     const emailConfig = getEmailDebugConfig();
+    const normalizedError =
+      error instanceof EmailDeliveryError
+        ? error
+        : new EmailDeliveryError({
+            message: 'OTP email service is temporarily unavailable. Please try again shortly.',
+            statusCode: 503,
+            code: 'email_delivery_unknown_failure',
+            reason: 'unknown_failure',
+            retryable: false,
+            permanent: false,
+          });
+
+    logger.error({
+      event: 'otp_delivery_failed',
+      email,
+      type,
+      statusCode: normalizedError.statusCode,
+      code: normalizedError.code,
+      reason: normalizedError.reason,
+      retryable: normalizedError.retryable,
+      operatorHint: normalizedError.operatorHint,
+      emailConfig,
+      originalError: error?.message,
+    });
 
     if (env.EMAIL_FAIL_OPEN) {
       logger.warn({
@@ -98,21 +126,23 @@ const deliverOtpOrFallback = async ({ email, otp, type }) => {
         email,
         type,
         otp: env.EMAIL_LOG_OTP ? otp : undefined,
-        error: error.message,
+        error: normalizedError.message,
+        code: normalizedError.code,
+        reason: normalizedError.reason,
         emailConfig,
       });
 
       return {
         delivered: false,
         devOtp: env.EMAIL_LOG_OTP ? otp : undefined,
-        emailError: error.message,
+        emailError: normalizedError.message,
         emailConfig,
       };
     }
 
     throw new AppError(
-      'OTP email sending failed. Please verify BREVO_API_KEY and EMAIL_FROM, then redeploy.',
-      502
+      'OTP email service is temporarily unavailable. Please try again in a few minutes.',
+      normalizedError.statusCode || 503
     );
   }
 };

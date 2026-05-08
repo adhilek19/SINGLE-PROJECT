@@ -18,7 +18,7 @@ const ForgotPassword = () => {
       const devOtp = response.data?.data?.devOtp;
 
       if (devOtp) {
-        toast.success(`SMTP failed. Development OTP: ${devOtp}`);
+        toast.success(`Email delivery failed. Development OTP: ${devOtp}`);
       } else {
         toast.success('OTP sent to your email!');
       }

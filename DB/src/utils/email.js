@@ -1,6 +1,9 @@
 import { env } from '../config/env.js';
 import { logger } from './logger.js';
 
+const BREVO_AUTHORISED_IPS_URL = 'https://app.brevo.com/security/authorised_ips';
+const DEFAULT_PROVIDER_BLOCK_SECONDS = 300;
+
 const getOtpSubject = (type) =>
   type === 'reset' ? 'Password reset OTP' : 'Email verification OTP';
 
@@ -45,6 +48,182 @@ const sender = parseSender(env.EMAIL_FROM);
 const hasBrevoApiKey = Boolean(String(env.BREVO_API_KEY || '').trim());
 const hasValidSender = Boolean(String(sender.email || '').trim());
 let brevoClientPromise = null;
+let providerBlockedUntil = 0;
+let providerBlockReason = null;
+let providerBlockHint = null;
+
+export class EmailDeliveryError extends Error {
+  constructor({
+    message,
+    statusCode = 503,
+    code = 'email_delivery_failed',
+    reason = 'unknown',
+    retryable = false,
+    permanent = false,
+    operatorHint = null,
+    provider = 'brevo',
+    providerStatusCode = null,
+    providerCode = null,
+  }) {
+    super(message);
+    this.name = 'EmailDeliveryError';
+    this.statusCode = statusCode;
+    this.code = code;
+    this.reason = reason;
+    this.retryable = retryable;
+    this.permanent = permanent;
+    this.operatorHint = operatorHint;
+    this.provider = provider;
+    this.providerStatusCode = providerStatusCode;
+    this.providerCode = providerCode;
+    this.isOperational = true;
+  }
+}
+
+const getProviderBlockSeconds = () => {
+  const value = Number(env.EMAIL_PROVIDER_BLOCK_SECONDS);
+  if (Number.isFinite(value) && value >= 30) {
+    return Math.floor(value);
+  }
+  return DEFAULT_PROVIDER_BLOCK_SECONDS;
+};
+
+const parseResponseBody = (value) => {
+  if (!value) return {};
+  if (typeof value === 'object') return value;
+  if (typeof value === 'string') {
+    try {
+      return JSON.parse(value);
+    } catch {
+      return { message: value };
+    }
+  }
+  return {};
+};
+
+const isIpAuthorisationFailure = (providerStatusCode, providerCode, providerMessage) => {
+  if (providerStatusCode !== 401) return false;
+  if (providerCode !== 'unauthorized') return false;
+  const normalized = String(providerMessage || '').toLowerCase();
+  return (
+    normalized.includes('unrecognised ip address') ||
+    normalized.includes('unrecognized ip address')
+  );
+};
+
+const toEmailDeliveryError = (error) => {
+  const providerStatusCode =
+    Number(error?.statusCode || error?.rawResponse?.status || 0) || null;
+  const parsedBody = parseResponseBody(error?.body || error?.rawResponse?.body);
+  const providerCode = String(parsedBody?.code || '').trim().toLowerCase() || null;
+  const providerMessage = String(
+    parsedBody?.message || error?.message || 'Brevo email request failed'
+  ).trim();
+
+  if (isIpAuthorisationFailure(providerStatusCode, providerCode, providerMessage)) {
+    return new EmailDeliveryError({
+      message: 'OTP email service is temporarily unavailable. Please try again shortly.',
+      statusCode: 503,
+      code: 'brevo_ip_not_authorized',
+      reason: 'ip_not_authorized',
+      retryable: false,
+      permanent: true,
+      operatorHint: `Brevo rejected server IP. Add deployment egress IP to ${BREVO_AUTHORISED_IPS_URL}.`,
+      providerStatusCode,
+      providerCode,
+    });
+  }
+
+  if (providerStatusCode === 401) {
+    return new EmailDeliveryError({
+      message: 'OTP email service is temporarily unavailable. Please try again shortly.',
+      statusCode: 503,
+      code: 'brevo_unauthorized',
+      reason: 'unauthorized',
+      retryable: false,
+      permanent: true,
+      operatorHint: 'BREVO_API_KEY is invalid, revoked, or missing the required scope.',
+      providerStatusCode,
+      providerCode,
+    });
+  }
+
+  if (providerStatusCode === 429 || (providerStatusCode !== null && providerStatusCode >= 500)) {
+    return new EmailDeliveryError({
+      message: 'OTP email service is temporarily unavailable. Please try again shortly.',
+      statusCode: 503,
+      code: 'brevo_transient_failure',
+      reason: 'transient_upstream_failure',
+      retryable: true,
+      permanent: false,
+      operatorHint: 'Brevo is rate-limiting or unavailable. Retries should recover automatically.',
+      providerStatusCode,
+      providerCode,
+    });
+  }
+
+  if (!providerStatusCode) {
+    return new EmailDeliveryError({
+      message: 'OTP email service is temporarily unavailable. Please try again shortly.',
+      statusCode: 503,
+      code: 'brevo_network_or_sdk_failure',
+      reason: 'network_or_sdk_failure',
+      retryable: true,
+      permanent: false,
+      operatorHint: 'Could not reach Brevo API or SDK threw before a response was received.',
+      providerStatusCode,
+      providerCode,
+    });
+  }
+
+  return new EmailDeliveryError({
+    message: 'OTP email service is temporarily unavailable. Please try again shortly.',
+    statusCode: 503,
+    code: 'brevo_delivery_failed',
+    reason: 'unknown_provider_failure',
+    retryable: false,
+    permanent: false,
+    operatorHint: 'Inspect Brevo response details in logs.',
+    providerStatusCode,
+    providerCode,
+  });
+};
+
+const openProviderCircuit = (emailError) => {
+  if (!emailError?.permanent) return;
+  if (emailError.code === 'email_provider_circuit_open') return;
+  if (Date.now() < providerBlockedUntil && providerBlockReason === emailError.reason) {
+    return;
+  }
+
+  const seconds = getProviderBlockSeconds();
+  providerBlockedUntil = Date.now() + seconds * 1000;
+  providerBlockReason = emailError.reason || 'unknown';
+  providerBlockHint = emailError.operatorHint || null;
+
+  logger.warn({
+    event: 'email_provider_circuit_open',
+    provider: 'brevo',
+    reason: providerBlockReason,
+    blockSeconds: seconds,
+    blockedUntil: new Date(providerBlockedUntil).toISOString(),
+    operatorHint: providerBlockHint,
+  });
+};
+
+const assertProviderNotBlocked = () => {
+  if (Date.now() >= providerBlockedUntil) return;
+
+  throw new EmailDeliveryError({
+    message: 'OTP email service is temporarily unavailable. Please try again shortly.',
+    statusCode: 503,
+    code: 'email_provider_circuit_open',
+    reason: providerBlockReason || 'provider_blocked',
+    retryable: false,
+    permanent: true,
+    operatorHint: providerBlockHint || 'Email provider circuit is temporarily open.',
+  });
+};
 
 const getBrevoClient = async () => {
   if (!brevoClientPromise) {
@@ -68,6 +247,11 @@ export const getEmailDebugConfig = () => ({
   provider: 'brevo',
   senderEmail: sender.email,
   senderName: sender.name,
+  providerBlockedUntil:
+    providerBlockedUntil > Date.now()
+      ? new Date(providerBlockedUntil).toISOString()
+      : null,
+  providerBlockReason: providerBlockReason,
 });
 
 export const verifyEmailTransporter = async () => {
@@ -103,17 +287,18 @@ export const sendOtpEmail = async (to, otp, type = 'verify') => {
   const htmlContent = getOtpHtml(otp, type);
 
   try {
+    assertProviderNotBlocked();
+
     if (!hasBrevoApiKey || !hasValidSender) {
-      logger.error({
-        event: 'email_provider_not_configured',
-        provider: 'brevo',
-        hasBrevoApiKey,
-        hasSenderEmail: hasValidSender,
-        senderEmail: sender.email || null,
+      throw new EmailDeliveryError({
+        message: 'OTP email service is temporarily unavailable. Please try again shortly.',
+        statusCode: 503,
+        code: 'email_provider_not_configured',
+        reason: 'provider_not_configured',
+        retryable: false,
+        permanent: true,
+        operatorHint: 'Set BREVO_API_KEY and EMAIL_FROM in the backend environment.',
       });
-      throw new Error(
-        'Brevo email provider is not configured. Set BREVO_API_KEY and EMAIL_FROM.'
-      );
     }
 
     const brevo = await getBrevoClient();
@@ -140,6 +325,24 @@ export const sendOtpEmail = async (to, otp, type = 'verify') => {
 
     return { messageId };
   } catch (error) {
+    const emailError =
+      error instanceof EmailDeliveryError ? error : toEmailDeliveryError(error);
+
+    if (emailError.code === 'email_provider_circuit_open') {
+      const remainingMs = Math.max(0, providerBlockedUntil - Date.now());
+      logger.warn({
+        event: 'email_send_skipped_provider_circuit_open',
+        provider: 'brevo',
+        reason: emailError.reason,
+        remainingSeconds: Math.ceil(remainingMs / 1000),
+        operatorHint: emailError.operatorHint,
+      });
+      throw emailError;
+    }
+
+    openProviderCircuit(emailError);
+    const providerBody = parseResponseBody(error?.body || error?.rawResponse?.body);
+
     logger.error({
       event: 'email_failed',
       provider: 'brevo',
@@ -147,10 +350,18 @@ export const sendOtpEmail = async (to, otp, type = 'verify') => {
       subject,
       senderEmail: sender.email,
       error: error?.message,
-      statusCode: error?.statusCode || error?.rawResponse?.status,
-      responseBody: error?.body || error?.rawResponse?.body,
+      statusCode:
+        error?.statusCode ||
+        error?.rawResponse?.status ||
+        emailError.providerStatusCode ||
+        emailError.statusCode,
+      responseBody: providerBody,
+      errorCode: emailError.code,
+      reason: emailError.reason,
+      retryable: emailError.retryable,
+      operatorHint: emailError.operatorHint,
     });
 
-    throw error;
+    throw emailError;
   }
 };
