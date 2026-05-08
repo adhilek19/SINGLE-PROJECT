@@ -1,10 +1,5 @@
-import { BrevoClient } from '@getbrevo/brevo';
 import { env } from '../config/env.js';
 import { logger } from './logger.js';
-
-const brevo = new BrevoClient({
-  apiKey: env.BREVO_API_KEY,
-});
 
 const getOtpSubject = (type) =>
   type === 'reset' ? 'Password reset OTP' : 'Email verification OTP';
@@ -49,6 +44,25 @@ const parseSender = (value) => {
 const sender = parseSender(env.EMAIL_FROM);
 const hasBrevoApiKey = Boolean(String(env.BREVO_API_KEY || '').trim());
 const hasValidSender = Boolean(String(sender.email || '').trim());
+let brevoClientPromise = null;
+
+const getBrevoClient = async () => {
+  if (!brevoClientPromise) {
+    brevoClientPromise = import('@getbrevo/brevo')
+      .then(({ BrevoClient }) => new BrevoClient({ apiKey: env.BREVO_API_KEY }))
+      .catch((error) => {
+        logger.error({
+          event: 'email_provider_module_missing',
+          provider: 'brevo',
+          error: error?.message,
+          hint: 'Ensure @getbrevo/brevo is installed in DB package and Render installs dependencies inside DB.',
+        });
+        throw error;
+      });
+  }
+
+  return brevoClientPromise;
+};
 
 export const getEmailDebugConfig = () => ({
   provider: 'brevo',
@@ -102,6 +116,7 @@ export const sendOtpEmail = async (to, otp, type = 'verify') => {
       );
     }
 
+    const brevo = await getBrevoClient();
     const response = await brevo.transactionalEmails.sendTransacEmail({
       sender,
       to: [{ email: to }],
