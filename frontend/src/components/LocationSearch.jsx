@@ -1,8 +1,19 @@
-import React, { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { MapPin, Loader2 } from 'lucide-react';
 import { fetchGeoapifyLocations } from '../services/locationAutocomplete';
 
 const MIN_SEARCH_LENGTH = 2;
+const toLocationName = (place = {}) =>
+  String(place.name || place.label || '').trim();
+
+const hasValidCoords = (place = {}) =>
+  Number.isFinite(Number(place.lat)) && Number.isFinite(Number(place.lng));
+
+const normalizeSelectedLocation = (place = {}) => ({
+  name: toLocationName(place),
+  lat: Number(place.lat),
+  lng: Number(place.lng),
+});
 
 const LocationSearch = ({
   label,
@@ -18,9 +29,10 @@ const LocationSearch = ({
   isActive,
   onActivate,
   onCloseAll,
+  className = '',
 }) => {
   const initialValue =
-    (typeof value === 'string' ? value : value?.name || value?.label || '') ||
+    (typeof value === 'string' ? value : toLocationName(value)) ||
     defaultValue ||
     '';
   const [query, setQuery] = useState(initialValue);
@@ -28,21 +40,18 @@ const LocationSearch = ({
   const [isOpen, setIsOpen] = useState(false);
   const [loading, setLoading] = useState(false);
   const [noResults, setNoResults] = useState(false);
+  const [suggestionsError, setSuggestionsError] = useState('');
   const [hasSelectedLocation, setHasSelectedLocation] = useState(false);
   const [lastSelectedValue, setLastSelectedValue] = useState('');
-  const [isFocused, setIsFocused] = useState(false);
   const wrapperRef = useRef(null);
   const inputRef = useRef(null);
   const fieldIsActive = typeof isActive === 'boolean' ? isActive : true;
   const selectionLocked = hasSelectedLocation && query.trim() === lastSelectedValue;
 
   useEffect(() => {
-    const nextValue =
-      (typeof value === 'string' ? value : value?.name || value?.label || '') ||
-      defaultValue ||
-      '';
+    const nextValue = (typeof value === 'string' ? value : toLocationName(value)) || defaultValue || '';
     setQuery(nextValue);
-    if (value && typeof value === 'object' && (value.lat !== undefined || value.lng !== undefined)) {
+    if (value && typeof value === 'object' && hasValidCoords(value)) {
       setHasSelectedLocation(true);
       setLastSelectedValue(nextValue.trim());
     } else if (nextValue.trim()) {
@@ -56,6 +65,7 @@ const LocationSearch = ({
   useEffect(() => {
     setIsOpen(false);
     setNoResults(false);
+    setSuggestionsError('');
     setSuggestions([]);
   }, [closeSignal]);
 
@@ -63,13 +73,13 @@ const LocationSearch = ({
     if (!fieldIsActive) {
       setIsOpen(false);
       setSuggestions([]);
+      setSuggestionsError('');
     }
   }, [fieldIsActive]);
 
   useEffect(() => {
     const closeDropdown = (event) => {
       if (wrapperRef.current && !wrapperRef.current.contains(event.target)) {
-        setIsFocused(false);
         setIsOpen(false);
         setSuggestions([]);
         onCloseAll?.();
@@ -95,10 +105,12 @@ const LocationSearch = ({
         setSuggestions([]);
         setIsOpen(false);
         setNoResults(false);
+        setSuggestionsError('');
         return;
       }
 
       setLoading(true);
+      setSuggestionsError('');
 
       try {
         const data = await fetchGeoapifyLocations(trimmedQuery, controller.signal);
@@ -109,7 +121,8 @@ const LocationSearch = ({
         if (error.name !== 'AbortError') {
           setSuggestions([]);
           setNoResults(false);
-          setIsOpen(false);
+          setSuggestionsError('Unable to load suggestions. Please try again.');
+          setIsOpen(true);
         }
       } finally {
         setLoading(false);
@@ -125,28 +138,26 @@ const LocationSearch = ({
   }, [query, fieldIsActive, disabled, hasSelectedLocation, lastSelectedValue]);
 
   const handleSelect = (place) => {
-    const selectedPlace = {
-      ...place,
-      name: place.name || place.label,
-    };
+    const selectedPlace = normalizeSelectedLocation(place);
+    if (!selectedPlace.name || !hasValidCoords(selectedPlace)) return;
 
-    const selectedText = selectedPlace.label || selectedPlace.name || '';
+    const selectedText = selectedPlace.name;
     setQuery(selectedText);
     setSuggestions([]);
     setNoResults(false);
+    setSuggestionsError('');
     setIsOpen(false);
     setHasSelectedLocation(true);
     setLastSelectedValue(selectedText.trim());
     onChange?.(selectedPlace);
     onSelect?.(selectedPlace);
-    setIsFocused(false);
     inputRef.current?.blur();
     onCloseAll?.();
   };
 
   return (
     <div
-      className="relative w-full"
+      className={`relative w-full ${isOpen && fieldIsActive ? 'z-[1200]' : 'z-20'} ${className}`}
       ref={wrapperRef}
       onMouseDown={() => {
         if (!disabled) {
@@ -181,15 +192,17 @@ const LocationSearch = ({
               setSuggestions([]);
               setIsOpen(false);
               setNoResults(false);
+              setSuggestionsError('');
               setHasSelectedLocation(false);
               setLastSelectedValue('');
-              onChange?.('');
+              onChange?.(null);
               return;
             }
 
             if (isManualEdit) {
               setHasSelectedLocation(false);
               setNoResults(false);
+              setSuggestionsError('');
               onChange?.(valueText);
               if (!disabled && trimmedValue.length >= MIN_SEARCH_LENGTH) {
                 setIsOpen(true);
@@ -197,7 +210,6 @@ const LocationSearch = ({
             }
           }}
           onFocus={() => {
-            setIsFocused(true);
             onActivate?.();
             onOpen?.();
             if (selectionLocked) return;
@@ -207,9 +219,20 @@ const LocationSearch = ({
           }}
           onKeyDown={(e) => {
             if (e.key === 'Enter') {
-              setIsFocused(false);
+              if (suggestions.length > 0 && query.trim().length >= MIN_SEARCH_LENGTH) {
+                e.preventDefault();
+                handleSelect(suggestions[0]);
+                return;
+              }
               setIsOpen(false);
               setSuggestions([]);
+              onCloseAll?.();
+            }
+            if (e.key === 'Escape') {
+              setIsOpen(false);
+              setSuggestions([]);
+              setNoResults(false);
+              setSuggestionsError('');
               onCloseAll?.();
             }
           }}
@@ -223,7 +246,7 @@ const LocationSearch = ({
       </div>
 
       {isOpen && fieldIsActive && !selectionLocked && (
-        <div className="absolute top-full left-0 right-0 mt-2 max-h-60 overflow-y-auto bg-white rounded-xl shadow-xl border border-slate-100 z-50 md:max-h-72">
+        <div className="absolute top-full left-0 right-0 mt-2 max-h-60 overflow-y-auto bg-white rounded-xl shadow-xl border border-slate-100 z-[1300] md:max-h-72">
           {suggestions.map((place) => (
             <button
               type="button"
@@ -235,6 +258,12 @@ const LocationSearch = ({
               {place.label}
             </button>
           ))}
+          {loading ? (
+            <div className="px-4 py-3 text-sm text-slate-500">Loading suggestions...</div>
+          ) : null}
+          {!loading && suggestionsError ? (
+            <div className="px-4 py-3 text-sm font-semibold text-rose-600">{suggestionsError}</div>
+          ) : null}
           {!loading && noResults ? (
             <div className="px-4 py-3 text-sm text-slate-500">No locations found</div>
           ) : null}

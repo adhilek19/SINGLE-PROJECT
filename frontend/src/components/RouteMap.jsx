@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import L from 'leaflet';
 import {
   MapContainer,
@@ -215,11 +215,13 @@ const RouteMap = ({ source, destination, liveLocations = [], height = '360px' })
   const [routeCoords, setRouteCoords] = useState([]);
   const [distanceKm, setDistanceKm] = useState(null);
   const [durationText, setDurationText] = useState('');
+  const [routeError, setRouteError] = useState('');
   const [loading, setLoading] = useState(false);
   const [smoothedLiveLocations, setSmoothedLiveLocations] = useState([]);
   const [liveRouteCoords, setLiveRouteCoords] = useState([]);
   const [liveDistanceKm, setLiveDistanceKm] = useState(null);
   const [liveEtaText, setLiveEtaText] = useState('');
+  const [liveRouteError, setLiveRouteError] = useState('');
   const liveLocationMapRef = useRef(new Map());
   const liveAnimationFrameRef = useRef(new Map());
 
@@ -337,6 +339,7 @@ const RouteMap = ({ source, destination, liveLocations = [], height = '360px' })
       setLiveRouteCoords([]);
       setLiveDistanceKm(null);
       setLiveEtaText('');
+      setLiveRouteError('');
       return undefined;
     }
 
@@ -357,16 +360,19 @@ const RouteMap = ({ source, destination, liveLocations = [], height = '360px' })
           setLiveRouteCoords([]);
           setLiveDistanceKm(null);
           setLiveEtaText('');
+          setLiveRouteError('Live route is currently unavailable.');
           return;
         }
 
         setLiveRouteCoords(decodePolyline(route.geometry));
         setLiveDistanceKm((route.distance / 1000).toFixed(1));
         setLiveEtaText(formatDuration(route.duration));
+        setLiveRouteError('');
       } catch {
         setLiveRouteCoords([]);
         setLiveDistanceKm(null);
         setLiveEtaText('');
+        setLiveRouteError('Live ETA is currently unavailable.');
       }
     }, 200);
 
@@ -382,6 +388,7 @@ const RouteMap = ({ source, destination, liveLocations = [], height = '360px' })
 
       try {
         setLoading(true);
+        setRouteError('');
 
         const srcLng = Number(source.lng);
         const srcLat = Number(source.lat);
@@ -402,17 +409,20 @@ const RouteMap = ({ source, destination, liveLocations = [], height = '360px' })
           ]);
           setDistanceKm(null);
           setDurationText('');
+          setRouteError('Route provider returned no path. Showing straight line.');
           return;
         }
 
         setRouteCoords(decodePolyline(route.geometry));
         setDistanceKm((route.distance / 1000).toFixed(1));
         setDurationText(formatDuration(route.duration));
+        setRouteError('');
       } catch {
         setRouteCoords([
           [Number(source.lat), Number(source.lng)],
           [Number(destination.lat), Number(destination.lng)],
         ]);
+        setRouteError('Unable to load route details. Showing straight line.');
       } finally {
         setLoading(false);
       }
@@ -447,6 +457,11 @@ const RouteMap = ({ source, destination, liveLocations = [], height = '360px' })
               ? 'Calculating route...'
               : 'Source, destination, live route, profile markers and speed'}
           </p>
+          {!loading && (routeError || liveRouteError) ? (
+            <p className="mt-1 text-xs font-semibold text-rose-600">
+              {[routeError, liveRouteError].filter(Boolean).join(' ')}
+            </p>
+          ) : null}
         </div>
 
         <div className="flex gap-2 text-xs font-bold">

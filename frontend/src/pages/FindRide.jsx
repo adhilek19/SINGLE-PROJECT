@@ -14,6 +14,7 @@ import { Link, useSearchParams } from 'react-router-dom';
 import toast from 'react-hot-toast';
 import { useSelector } from 'react-redux';
 import LocationSearch from '../components/LocationSearch';
+import RouteMap from '../components/RouteMap';
 import { getErrorMessage, rideService } from '../services/api';
 import { resolveGeoapifyBestLocation } from '../services/locationAutocomplete';
 
@@ -54,6 +55,12 @@ const DEFAULT_UI_FILTERS = {
   pricePreset: 'any',
   timeWindow: 'any',
   sortUi: 'recommended',
+};
+
+const DEFAULT_LIST_QUERY = {
+  page: 1,
+  limit: 30,
+  sort: 'departure_time',
 };
 
 const EmptyState = ({ title, message }) => (
@@ -281,10 +288,7 @@ const FindRide = () => {
   const [minPrice, setMinPrice] = useState('');
   const [maxPrice, setMaxPrice] = useState('');
   const [seats, setSeats] = useState('');
-  const [radiusKm, setRadiusKm] = useState('');
   const [sort, setSort] = useState('departure_time');
-  const [lat, setLat] = useState('');
-  const [lng, setLng] = useState('');
   const [preferenceFilters, setPreferenceFilters] = useState(DEFAULT_PREFERENCE_FILTERS);
 
   const [draftFilters, setDraftFilters] = useState(DEFAULT_UI_FILTERS);
@@ -300,7 +304,6 @@ const FindRide = () => {
   const [lastSearchParams, setLastSearchParams] = useState(null);
   const [recentSearches, setRecentSearches] = useState([]);
   const [closeSuggestionsSignal, setCloseSuggestionsSignal] = useState(0);
-  const [activeLocationDropdown, setActiveLocationDropdown] = useState(null);
   const [fromCorrectionHint, setFromCorrectionHint] = useState('');
   const [toCorrectionHint, setToCorrectionHint] = useState('');
   const [searchStateReady, setSearchStateReady] = useState(false);
@@ -308,9 +311,17 @@ const FindRide = () => {
   const fromText = getSearchText(from);
   const toText = getSearchText(to);
   const noQueryTyped = !fromText && !toText;
+  const hasFromCoords = hasLocationCoords(from);
+  const hasToCoords = hasLocationCoords(to);
+  const showMapPreview = Boolean(fromText || toText);
+  const mapPreviewSource = hasFromCoords
+    ? { name: fromText || 'From', lat: Number(from.lat), lng: Number(from.lng) }
+    : null;
+  const mapPreviewDestination = hasToCoords
+    ? { name: toText || 'To', lat: Number(to.lat), lng: Number(to.lng) }
+    : null;
 
   const closeAllDropdowns = () => {
-    setActiveLocationDropdown(null);
     setCloseSuggestionsSignal((prev) => prev + 1);
   };
 
@@ -323,10 +334,9 @@ const FindRide = () => {
       minPrice !== '' ||
       maxPrice !== '' ||
       seats !== '' ||
-      radiusKm !== '' ||
       Object.values(preferenceFilters).some((value) => value !== '' && value !== false)
     );
-  }, [fromText, toText, dateTime, vehicleType, minPrice, maxPrice, seats, radiusKm, preferenceFilters]);
+  }, [fromText, toText, dateTime, vehicleType, minPrice, maxPrice, seats, preferenceFilters]);
 
   const saveSearchState = () => {
     if (!searchStateReady) return;
@@ -342,10 +352,7 @@ const FindRide = () => {
       minPrice,
       maxPrice,
       seats,
-      radiusKm,
       sort,
-      lat,
-      lng,
       preferenceFilters,
       uiFilters: appliedFilters,
     };
@@ -359,7 +366,7 @@ const FindRide = () => {
       fromLocation: from,
       toLocation: to,
       dateTime,
-      filters: { vehicleType, minPrice, maxPrice, seats, radiusKm, sort, preferenceFilters },
+      filters: { vehicleType, minPrice, maxPrice, seats, sort, preferenceFilters },
     });
 
     if (!historyItem.source && !historyItem.destination) return;
@@ -375,7 +382,7 @@ const FindRide = () => {
   useEffect(() => {
     saveSearchState();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [searchStateReady, fromText, toText, from?.lat, from?.lng, to?.lat, to?.lng, dateTime, vehicleType, minPrice, maxPrice, seats, radiusKm, sort, lat, lng, preferenceFilters, appliedFilters]);
+  }, [searchStateReady, fromText, toText, from?.lat, from?.lng, to?.lat, to?.lng, dateTime, vehicleType, minPrice, maxPrice, seats, sort, preferenceFilters, appliedFilters]);
 
   const buildTimeWindow = (rawDateTime) => {
     if (!rawDateTime) return {};
@@ -417,22 +424,32 @@ const FindRide = () => {
     const resolvedFrom = await resolveLocationForSearch(from);
     const resolvedTo = await resolveLocationForSearch(to);
 
-    const params = { page: 1, limit: 30, sort };
+    const params = { ...DEFAULT_LIST_QUERY, sort };
 
     const resolvedFromText = getSearchText(resolvedFrom.location);
     const resolvedToText = getSearchText(resolvedTo.location);
 
-    if (resolvedFromText) params.from = resolvedFromText;
-    if (resolvedToText) params.to = resolvedToText;
+    if (resolvedFromText) {
+      params.from = resolvedFromText;
+      params.sourceText = resolvedFromText;
+    }
+    if (resolvedToText) {
+      params.to = resolvedToText;
+      params.destinationText = resolvedToText;
+    }
 
     if (hasLocationCoords(resolvedFrom.location)) {
       params.fromLat = Number(resolvedFrom.location.lat);
       params.fromLng = Number(resolvedFrom.location.lng);
+      params.sourceLat = params.fromLat;
+      params.sourceLng = params.fromLng;
     }
 
     if (hasLocationCoords(resolvedTo.location)) {
       params.toLat = Number(resolvedTo.location.lat);
       params.toLng = Number(resolvedTo.location.lng);
+      params.destinationLat = params.toLat;
+      params.destinationLng = params.toLng;
     }
 
     Object.assign(params, buildTimeWindow(dateTime));
@@ -442,18 +459,10 @@ const FindRide = () => {
     const parsedMinPrice = parseNumberIfValid(minPrice);
     const parsedMaxPrice = parseNumberIfValid(maxPrice);
     const parsedSeats = parseNumberIfValid(seats);
-    const parsedLat = parseNumberIfValid(lat);
-    const parsedLng = parseNumberIfValid(lng);
-    const parsedRadius = parseNumberIfValid(radiusKm);
 
     if (parsedMinPrice !== undefined) params.minPrice = parsedMinPrice;
     if (parsedMaxPrice !== undefined) params.maxPrice = parsedMaxPrice;
     if (parsedSeats !== undefined) params.seats = parsedSeats;
-    if (parsedLat !== undefined && parsedLng !== undefined) {
-      params.lat = parsedLat;
-      params.lng = parsedLng;
-    }
-    if (parsedRadius !== undefined) params.radiusKm = parsedRadius;
 
     Object.entries(preferenceFilters).forEach(([key, value]) => {
       if (value !== false && value !== '') params[key] = value;
@@ -464,27 +473,81 @@ const FindRide = () => {
 
   const applySearchParamsToUrl = (params) => {
     const next = new URLSearchParams();
+    const internalOnlyKeys = new Set([
+      'sourceText',
+      'destinationText',
+      'sourceLat',
+      'sourceLng',
+      'destinationLat',
+      'destinationLng',
+    ]);
+
     Object.entries(params).forEach(([k, v]) => {
+      if (internalOnlyKeys.has(k)) return;
       if (v !== undefined && v !== null && v !== '') next.set(k, String(v));
     });
     setSearchParams(next);
   };
 
-  const fetchRides = async (params = {}) => {
+  const stripCoordinateFilters = (params = {}) => {
+    const next = { ...params };
+    delete next.fromLat;
+    delete next.fromLng;
+    delete next.toLat;
+    delete next.toLng;
+    delete next.sourceLat;
+    delete next.sourceLng;
+    delete next.destinationLat;
+    delete next.destinationLng;
+    return next;
+  };
+
+  const fetchRides = async (
+    params = {},
+    { mode = 'list', relaxCoordinateFilterOnEmpty = false, persistSearch = true } = {}
+  ) => {
     if (loading) return;
+
     try {
       setLoading(true);
       setSearchError('');
-      setLastSearchParams(params);
-      const res = await rideService.getRides(params);
-      setRides(normalizeListResponse(res));
+      setLastSearchParams({ params, mode, relaxCoordinateFilterOnEmpty, persistSearch });
+
+      const requestFn = mode === 'search' ? rideService.searchRides : rideService.getRides;
+      let effectiveParams = { ...params };
+      let response = await requestFn(effectiveParams);
+      let list = normalizeListResponse(response);
+
+      const canRelaxCoords =
+        mode === 'search' &&
+        relaxCoordinateFilterOnEmpty &&
+        list.length === 0 &&
+        (effectiveParams.from || effectiveParams.to) &&
+        (effectiveParams.fromLat !== undefined || effectiveParams.toLat !== undefined);
+
+      if (canRelaxCoords) {
+        const relaxedParams = stripCoordinateFilters(effectiveParams);
+        response = await requestFn(relaxedParams);
+        const relaxedList = normalizeListResponse(response);
+        if (relaxedList.length > 0) {
+          toast('No exact coordinate match. Showing broader route results.');
+          list = relaxedList;
+          effectiveParams = relaxedParams;
+        }
+      }
+
+      setRides(list);
       setNearbyMode(false);
       setNearbyCount(0);
-      saveSearchState();
-      saveSearchHistory();
+      if (persistSearch) {
+        saveSearchState();
+        saveSearchHistory();
+      }
+      return { rides: list, effectiveParams };
     } catch (err) {
       setSearchError(getErrorMessage(err, 'Failed to fetch rides'));
       setRides([]);
+      return null;
     } finally {
       setLoading(false);
     }
@@ -512,10 +575,12 @@ const FindRide = () => {
       setRides(nearbyList);
       setNearbyMode(true);
       setNearbyCount(Number(data.count || nearbyList.length || 0));
+      return nearbyList;
     } catch (err) {
       setNearbyMode(false);
       setNearbyCount(0);
       setSearchError(getErrorMessage(err, 'Failed to fetch nearby rides'));
+      return [];
     } finally {
       setLoading(false);
     }
@@ -539,8 +604,13 @@ const FindRide = () => {
         if (resolvedTo.correctedLabel) setToCorrectionHint(`Showing results for ${resolvedTo.correctedLabel}`);
       }
 
-      applySearchParamsToUrl(params);
-      await fetchRides(params);
+      const result = await fetchRides(params, {
+        mode: 'search',
+        relaxCoordinateFilterOnEmpty: true,
+      });
+      if (result?.effectiveParams) {
+        applySearchParamsToUrl(result.effectiveParams);
+      }
     } catch (err) {
       setSearchError(err?.message || 'Invalid search inputs');
       toast.error(err?.message || 'Invalid search inputs');
@@ -552,7 +622,39 @@ const FindRide = () => {
     await runSearch();
   };
 
-  const handleClearSearch = () => {
+  const handleFindNearby = async () => {
+    if (!navigator.geolocation) {
+      toast.error('Geolocation is not supported in this browser.');
+      return;
+    }
+
+    closeAllDropdowns();
+    setLocating(true);
+
+    navigator.geolocation.getCurrentPosition(
+      async (position) => {
+        const detectedLat = position.coords.latitude;
+        const detectedLng = position.coords.longitude;
+        await fetchNearbyRides({
+          lat: detectedLat,
+          lng: detectedLng,
+          radius: 10,
+        });
+        setLocating(false);
+      },
+      () => {
+        toast.error('Unable to access your location.');
+        setLocating(false);
+      },
+      {
+        enableHighAccuracy: true,
+        timeout: 10000,
+        maximumAge: 2 * 60 * 1000,
+      }
+    );
+  };
+
+  const handleClearSearch = async () => {
     closeAllDropdowns();
     setFrom(null);
     setTo(null);
@@ -561,10 +663,7 @@ const FindRide = () => {
     setMinPrice('');
     setMaxPrice('');
     setSeats('');
-    setRadiusKm('');
     setSort('departure_time');
-    setLat('');
-    setLng('');
     setPreferenceFilters({ ...DEFAULT_PREFERENCE_FILTERS });
     setDraftFilters(DEFAULT_UI_FILTERS);
     setAppliedFilters(DEFAULT_UI_FILTERS);
@@ -574,14 +673,21 @@ const FindRide = () => {
     setLastSearchParams(null);
     setNearbyMode(false);
     setNearbyCount(0);
-    setRides([]);
     localStorage.removeItem(SEARCH_STATE_KEY);
     setSearchParams(new URLSearchParams());
+    await fetchRides(DEFAULT_LIST_QUERY, { mode: 'list', persistSearch: false });
   };
 
-  const handleRetry = () => {
+  const handleRetry = async () => {
     if (!lastSearchParams) return;
-    fetchRides(lastSearchParams);
+    const result = await fetchRides(lastSearchParams.params, {
+      mode: lastSearchParams.mode,
+      relaxCoordinateFilterOnEmpty: lastSearchParams.relaxCoordinateFilterOnEmpty,
+      persistSearch: lastSearchParams.persistSearch,
+    });
+    if (result?.effectiveParams) {
+      applySearchParamsToUrl(result.effectiveParams);
+    }
   };
 
   const applyHistoryItem = (item) => {
@@ -602,7 +708,6 @@ const FindRide = () => {
     setMinPrice(filters.minPrice || '');
     setMaxPrice(filters.maxPrice || '');
     setSeats(filters.seats || '');
-    setRadiusKm(filters.radiusKm || '');
     setSort(filters.sort || 'departure_time');
     setPreferenceFilters(filters.preferenceFilters || DEFAULT_PREFERENCE_FILTERS);
     setDraftFilters(restoredUi);
@@ -705,10 +810,7 @@ const FindRide = () => {
       minPrice: searchParams.get('minPrice') || '',
       maxPrice: searchParams.get('maxPrice') || '',
       seats: searchParams.get('seats') || '',
-      radiusKm: searchParams.get('radiusKm') || '',
       sort: searchParams.get('sort') || 'departure_time',
-      lat: searchParams.get('lat') || '',
-      lng: searchParams.get('lng') || '',
       preferenceFilters: {
         womenOnly: searchParams.get('womenOnly') === 'true',
         verifiedOnly: searchParams.get('verifiedOnly') === 'true',
@@ -722,8 +824,8 @@ const FindRide = () => {
 
     const hasUrlState =
       Boolean(paramsFromUrl.from || paramsFromUrl.to || paramsFromUrl.dateTime || paramsFromUrl.date) ||
-      Boolean(paramsFromUrl.vehicleType || paramsFromUrl.minPrice || paramsFromUrl.maxPrice || paramsFromUrl.seats || paramsFromUrl.radiusKm) ||
-      Boolean(paramsFromUrl.lat || paramsFromUrl.lng || paramsFromUrl.fromLat || paramsFromUrl.fromLng || paramsFromUrl.toLat || paramsFromUrl.toLng) ||
+      Boolean(paramsFromUrl.vehicleType || paramsFromUrl.minPrice || paramsFromUrl.maxPrice || paramsFromUrl.seats) ||
+      Boolean(paramsFromUrl.fromLat || paramsFromUrl.fromLng || paramsFromUrl.toLat || paramsFromUrl.toLng) ||
       Object.values(paramsFromUrl.preferenceFilters).some((v) => v !== '' && v !== false);
 
     if (hasUrlState) {
@@ -737,10 +839,7 @@ const FindRide = () => {
       setMinPrice(paramsFromUrl.minPrice);
       setMaxPrice(paramsFromUrl.maxPrice);
       setSeats(paramsFromUrl.seats);
-      setRadiusKm(paramsFromUrl.radiusKm);
       setSort(paramsFromUrl.sort);
-      setLat(paramsFromUrl.lat);
-      setLng(paramsFromUrl.lng);
       setPreferenceFilters(paramsFromUrl.preferenceFilters);
 
       const uiFromUrl = {
@@ -759,15 +858,25 @@ const FindRide = () => {
       setSearchStateReady(true);
 
       const initialParams = { page: Number(searchParams.get('page') || 1), limit: Number(searchParams.get('limit') || 30), sort: paramsFromUrl.sort };
-      if (paramsFromUrl.from) initialParams.from = paramsFromUrl.from;
-      if (paramsFromUrl.to) initialParams.to = paramsFromUrl.to;
+      if (paramsFromUrl.from) {
+        initialParams.from = paramsFromUrl.from;
+        initialParams.sourceText = paramsFromUrl.from;
+      }
+      if (paramsFromUrl.to) {
+        initialParams.to = paramsFromUrl.to;
+        initialParams.destinationText = paramsFromUrl.to;
+      }
       if (paramsFromUrl.fromLat !== '' && paramsFromUrl.fromLng !== '') {
         initialParams.fromLat = Number(paramsFromUrl.fromLat);
         initialParams.fromLng = Number(paramsFromUrl.fromLng);
+        initialParams.sourceLat = initialParams.fromLat;
+        initialParams.sourceLng = initialParams.fromLng;
       }
       if (paramsFromUrl.toLat !== '' && paramsFromUrl.toLng !== '') {
         initialParams.toLat = Number(paramsFromUrl.toLat);
         initialParams.toLng = Number(paramsFromUrl.toLng);
+        initialParams.destinationLat = initialParams.toLat;
+        initialParams.destinationLng = initialParams.toLng;
       }
       if (paramsFromUrl.dateTime) {
         const selected = new Date(paramsFromUrl.dateTime);
@@ -783,21 +892,23 @@ const FindRide = () => {
       if (paramsFromUrl.minPrice !== '') initialParams.minPrice = Number(paramsFromUrl.minPrice);
       if (paramsFromUrl.maxPrice !== '') initialParams.maxPrice = Number(paramsFromUrl.maxPrice);
       if (paramsFromUrl.seats !== '') initialParams.seats = Number(paramsFromUrl.seats);
-      if (paramsFromUrl.lat !== '' && paramsFromUrl.lng !== '') {
-        initialParams.lat = Number(paramsFromUrl.lat);
-        initialParams.lng = Number(paramsFromUrl.lng);
-      }
-      if (paramsFromUrl.radiusKm !== '') initialParams.radiusKm = Number(paramsFromUrl.radiusKm);
       Object.entries(paramsFromUrl.preferenceFilters).forEach(([key, value]) => {
         if (value !== '' && value !== false) initialParams[key] = value;
       });
 
       const shouldAutoSearchFromUrl =
         Boolean(paramsFromUrl.from || paramsFromUrl.to || paramsFromUrl.date || paramsFromUrl.dateTime) ||
-        Boolean(paramsFromUrl.vehicleType || paramsFromUrl.minPrice || paramsFromUrl.maxPrice || paramsFromUrl.seats || paramsFromUrl.radiusKm) ||
+        Boolean(paramsFromUrl.vehicleType || paramsFromUrl.minPrice || paramsFromUrl.maxPrice || paramsFromUrl.seats) ||
         Object.values(paramsFromUrl.preferenceFilters).some((v) => v !== '' && v !== false);
 
-      if (shouldAutoSearchFromUrl) fetchRides(initialParams);
+      if (shouldAutoSearchFromUrl) {
+        void fetchRides(initialParams, {
+          mode: 'search',
+          relaxCoordinateFilterOnEmpty: true,
+        });
+      } else {
+        void fetchRides(DEFAULT_LIST_QUERY, { mode: 'list', persistSearch: false });
+      }
       return;
     }
 
@@ -815,10 +926,7 @@ const FindRide = () => {
         setMinPrice(parsed?.minPrice || '');
         setMaxPrice(parsed?.maxPrice || '');
         setSeats(parsed?.seats || '');
-        setRadiusKm(parsed?.radiusKm || '');
         setSort(parsed?.sort || 'departure_time');
-        setLat(parsed?.lat || '');
-        setLng(parsed?.lng || '');
         setPreferenceFilters(parsed?.preferenceFilters || DEFAULT_PREFERENCE_FILTERS);
 
         const restoredUi = parsed?.uiFilters || {
@@ -838,20 +946,30 @@ const FindRide = () => {
 
         const hasMeaningfulSavedState =
           Boolean(restoredFrom || restoredTo || parsed?.dateTime) ||
-          Boolean(parsed?.vehicleType || parsed?.minPrice || parsed?.maxPrice || parsed?.seats || parsed?.radiusKm) ||
+          Boolean(parsed?.vehicleType || parsed?.minPrice || parsed?.maxPrice || parsed?.seats) ||
           Object.values(parsed?.preferenceFilters || {}).some((v) => v !== '' && v !== false);
 
         if (hasMeaningfulSavedState) {
           const initialParams = { page: 1, limit: 30, sort: parsed?.sort || 'departure_time' };
-          if (parsed?.fromText) initialParams.from = parsed.fromText;
-          if (parsed?.toText) initialParams.to = parsed.toText;
+          if (parsed?.fromText) {
+            initialParams.from = parsed.fromText;
+            initialParams.sourceText = parsed.fromText;
+          }
+          if (parsed?.toText) {
+            initialParams.to = parsed.toText;
+            initialParams.destinationText = parsed.toText;
+          }
           if (parsed?.fromLat !== null && parsed?.fromLat !== undefined && parsed?.fromLng !== null && parsed?.fromLng !== undefined) {
             initialParams.fromLat = Number(parsed.fromLat);
             initialParams.fromLng = Number(parsed.fromLng);
+            initialParams.sourceLat = initialParams.fromLat;
+            initialParams.sourceLng = initialParams.fromLng;
           }
           if (parsed?.toLat !== null && parsed?.toLat !== undefined && parsed?.toLng !== null && parsed?.toLng !== undefined) {
             initialParams.toLat = Number(parsed.toLat);
             initialParams.toLng = Number(parsed.toLng);
+            initialParams.destinationLat = initialParams.toLat;
+            initialParams.destinationLng = initialParams.toLng;
           }
           if (parsed?.dateTime) {
             const selected = new Date(parsed.dateTime);
@@ -865,16 +983,14 @@ const FindRide = () => {
           if (parsed?.minPrice !== '') initialParams.minPrice = Number(parsed.minPrice);
           if (parsed?.maxPrice !== '') initialParams.maxPrice = Number(parsed.maxPrice);
           if (parsed?.seats !== '') initialParams.seats = Number(parsed.seats);
-          if (parsed?.lat !== '' && parsed?.lng !== '') {
-            initialParams.lat = Number(parsed.lat);
-            initialParams.lng = Number(parsed.lng);
-          }
-          if (parsed?.radiusKm !== '') initialParams.radiusKm = Number(parsed.radiusKm);
           Object.entries(parsed?.preferenceFilters || {}).forEach(([key, value]) => {
             if (value !== '' && value !== false) initialParams[key] = value;
           });
 
-          fetchRides(initialParams);
+          void fetchRides(initialParams, {
+            mode: 'search',
+            relaxCoordinateFilterOnEmpty: true,
+          });
           return;
         }
       } catch {
@@ -883,40 +999,7 @@ const FindRide = () => {
     }
 
     setSearchStateReady(true);
-
-    if (!navigator.geolocation) {
-      fetchRides({ page: 1, limit: 30, sort: 'departure_time' });
-      return;
-    }
-
-    setLocating(true);
-    navigator.geolocation.getCurrentPosition(
-      (position) => {
-        const detectedLat = position.coords.latitude;
-        const detectedLng = position.coords.longitude;
-        const detectedRadius = Number(radiusKm) > 0 ? Number(radiusKm) : 10;
-
-        setLat(String(detectedLat));
-        setLng(String(detectedLng));
-        if (!radiusKm) setRadiusKm(String(detectedRadius));
-
-        fetchNearbyRides({
-          lat: detectedLat,
-          lng: detectedLng,
-          radius: Math.min(50, Math.max(1, detectedRadius)),
-        });
-        setLocating(false);
-      },
-      () => {
-        setLocating(false);
-        fetchRides({ page: 1, limit: 30, sort: 'departure_time' });
-      },
-      {
-        enableHighAccuracy: true,
-        timeout: 10000,
-        maximumAge: 2 * 60 * 1000,
-      }
-    );
+    void fetchRides(DEFAULT_LIST_QUERY, { mode: 'list', persistSearch: false });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -1000,10 +1083,10 @@ const FindRide = () => {
   return (
     <main className="min-h-screen bg-slate-50 px-4 py-8 md:px-8">
       <section className="mx-auto max-w-7xl">
-        <form onSubmit={handleSubmit} className="relative z-20 mb-6 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+        <form onSubmit={handleSubmit} className="relative z-[1000] mb-6 overflow-visible rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
           <h1 className="mb-4 text-2xl font-black text-slate-900">Find a Ride</h1>
 
-          <div className="grid gap-3 md:grid-cols-2 lg:grid-cols-[1fr_1fr_180px_160px_120px_110px]">
+          <div className="grid gap-3 md:grid-cols-2 lg:grid-cols-[1fr_1fr_180px_160px_120px_110px_130px]">
             <LocationSearch
               label="From"
               value={from}
@@ -1011,9 +1094,6 @@ const FindRide = () => {
               placeholder="Source location"
               disabled={loading}
               closeSignal={closeSuggestionsSignal}
-              isActive={activeLocationDropdown === 'from'}
-              onActivate={() => setActiveLocationDropdown('from')}
-              onCloseAll={() => setActiveLocationDropdown(null)}
             />
 
             <LocationSearch
@@ -1023,9 +1103,6 @@ const FindRide = () => {
               placeholder="Destination location"
               disabled={loading}
               closeSignal={closeSuggestionsSignal}
-              isActive={activeLocationDropdown === 'to'}
-              onActivate={() => setActiveLocationDropdown('to')}
-              onCloseAll={() => setActiveLocationDropdown(null)}
             />
 
             <div>
@@ -1067,12 +1144,34 @@ const FindRide = () => {
               <X size={16} />
               Clear
             </button>
+
+            <button
+              type="button"
+              onClick={handleFindNearby}
+              disabled={loading || locating}
+              className="mt-7 inline-flex items-center justify-center gap-2 rounded-xl border border-emerald-300 bg-emerald-50 px-4 py-3 text-sm font-bold text-emerald-700 hover:bg-emerald-100 disabled:opacity-60"
+            >
+              {locating ? 'Locating...' : 'Near Me'}
+            </button>
           </div>
         </form>
 
         {fromCorrectionHint || toCorrectionHint ? (
           <div className="mb-4 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm font-semibold text-emerald-700">
             {[fromCorrectionHint, toCorrectionHint].filter(Boolean).join(' | ')}
+          </div>
+        ) : null}
+
+        {showMapPreview ? (
+          <div className="relative z-10 mb-6 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+            <h2 className="mb-3 text-base font-black text-slate-900">Route Preview</h2>
+            {mapPreviewSource && mapPreviewDestination ? (
+              <RouteMap source={mapPreviewSource} destination={mapPreviewDestination} height="280px" />
+            ) : (
+              <div className="rounded-xl border border-dashed border-slate-300 bg-slate-50 px-4 py-6 text-sm font-semibold text-slate-600">
+                Select a suggestion for both From and To to preview route on map.
+              </div>
+            )}
           </div>
         ) : null}
 

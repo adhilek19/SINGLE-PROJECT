@@ -1,8 +1,8 @@
-import React, { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { 
-  MapPin, Calendar, Clock, Users, IndianRupee, 
-  FileText, ArrowRight, Car, User, Navigation, Image as ImageIcon, X
+  Calendar, Clock, Users, IndianRupee,
+  FileText, ArrowRight, Car, Image as ImageIcon, X
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { useDispatch } from 'react-redux';
@@ -56,6 +56,15 @@ const normalizeDraftLocation = (place) => {
     lng: Number(place.lng) || 0,
   };
 };
+
+const hasValidLocationCoords = (place) =>
+  Number.isFinite(Number(place?.lat)) &&
+  Number.isFinite(Number(place?.lng)) &&
+  Number(place?.lat) >= -90 &&
+  Number(place?.lat) <= 90 &&
+  Number(place?.lng) >= -180 &&
+  Number(place?.lng) <= 180 &&
+  !(Number(place?.lat) === 0 && Number(place?.lng) === 0);
 
 const normalizePostRideDraft = (draft = {}) => ({
   ...DEFAULT_POST_RIDE_FORM,
@@ -171,8 +180,13 @@ const PostRide = () => {
 
   const handleSubmit = async (e) => {
     e.preventDefault();
-    if (!formData.source.name || !formData.destination.name) {
-      toast.error('Please select both source and destination from the dropdown');
+    if (
+      !formData.source.name ||
+      !formData.destination.name ||
+      !hasValidLocationCoords(formData.source) ||
+      !hasValidLocationCoords(formData.destination)
+    ) {
+      toast.error('Please select both source and destination from suggestions');
       return;
     }
     setLoading(true);
@@ -208,7 +222,7 @@ const PostRide = () => {
         toast.error(resultAction.payload || 'Failed to post ride');
       }
     } catch (error) {
-      toast.error('An unexpected error occurred');
+      toast.error(error?.message || 'An unexpected error occurred');
     } finally {
       setLoading(false);
     }
@@ -524,4 +538,3 @@ const PostRide = () => {
 };
 
 export default PostRide;
-

@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useDispatch } from 'react-redux';
 import {
@@ -28,12 +28,10 @@ const Home = () => {
   const [from, setFrom] = useState(null);
   const [to, setTo] = useState(null);
   const [date, setDate] = useState('');
-  const [activeLocationDropdown, setActiveLocationDropdown] = useState(null);
   const [closeSuggestionsSignal, setCloseSuggestionsSignal] = useState(0);
 
   const handleSearch = (e) => {
     e.preventDefault();
-    setActiveLocationDropdown(null);
     setCloseSuggestionsSignal((prev) => prev + 1);
 
     const params = new URLSearchParams();
@@ -120,9 +118,6 @@ const Home = () => {
                   onChange={setFrom}
                   placeholder="Enter starting location"
                   closeSignal={closeSuggestionsSignal}
-                  isActive={activeLocationDropdown === 'from'}
-                  onActivate={() => setActiveLocationDropdown('from')}
-                  onCloseAll={() => setActiveLocationDropdown(null)}
                 />
 
                 <LocationSearch
@@ -131,9 +126,6 @@ const Home = () => {
                   onChange={setTo}
                   placeholder="Enter destination"
                   closeSignal={closeSuggestionsSignal}
-                  isActive={activeLocationDropdown === 'to'}
-                  onActivate={() => setActiveLocationDropdown('to')}
-                  onCloseAll={() => setActiveLocationDropdown(null)}
                 />
 
                 <div>
