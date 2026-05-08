@@ -47,6 +47,8 @@ const parseSender = (value) => {
 };
 
 const sender = parseSender(env.EMAIL_FROM);
+const hasBrevoApiKey = Boolean(String(env.BREVO_API_KEY || '').trim());
+const hasValidSender = Boolean(String(sender.email || '').trim());
 
 export const getEmailDebugConfig = () => ({
   provider: 'brevo',
@@ -55,7 +57,7 @@ export const getEmailDebugConfig = () => ({
 });
 
 export const verifyEmailTransporter = async () => {
-  if (!env.BREVO_API_KEY) {
+  if (!hasBrevoApiKey) {
     logger.error({
       event: 'email_provider_not_configured',
       provider: 'brevo',
@@ -64,7 +66,7 @@ export const verifyEmailTransporter = async () => {
     return false;
   }
 
-  if (!sender.email) {
+  if (!hasValidSender) {
     logger.error({
       event: 'email_provider_not_configured',
       provider: 'brevo',
@@ -87,6 +89,19 @@ export const sendOtpEmail = async (to, otp, type = 'verify') => {
   const htmlContent = getOtpHtml(otp, type);
 
   try {
+    if (!hasBrevoApiKey || !hasValidSender) {
+      logger.error({
+        event: 'email_provider_not_configured',
+        provider: 'brevo',
+        hasBrevoApiKey,
+        hasSenderEmail: hasValidSender,
+        senderEmail: sender.email || null,
+      });
+      throw new Error(
+        'Brevo email provider is not configured. Set BREVO_API_KEY and EMAIL_FROM.'
+      );
+    }
+
     const response = await brevo.transactionalEmails.sendTransacEmail({
       sender,
       to: [{ email: to }],

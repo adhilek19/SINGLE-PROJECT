@@ -16,8 +16,10 @@ const envSchema = joi
     REFRESH_SECRET: joi.string().min(32).required(),
     REFRESH_EXPIRES_IN: joi.string().default('7d'),
 
-    EMAIL_FROM: joi.string().trim().required(),
-    BREVO_API_KEY: joi.string().trim().required(),
+    // Keep optional at startup so deployment does not crash if mail vars are missing.
+    // OTP endpoints still fail with clear errors when these are absent.
+    EMAIL_FROM: joi.string().trim().allow('').optional(),
+    BREVO_API_KEY: joi.string().trim().allow('').optional(),
     // In development/local, OTP endpoints should not break the whole auth flow
     // when email delivery fails due provider/network issues. In production keep this false.
     EMAIL_FAIL_OPEN: joi.boolean().truthy('true').falsy('false').optional(),
