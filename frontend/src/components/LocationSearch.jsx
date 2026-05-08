@@ -3,17 +3,27 @@ import { MapPin, Loader2 } from 'lucide-react';
 import { fetchGeoapifyLocations } from '../services/locationAutocomplete';
 
 const MIN_SEARCH_LENGTH = 2;
-const toLocationName = (place = {}) =>
-  String(place.name || place.label || '').trim();
+const toLocationName = (place) => {
+  if (typeof place === 'string') return place.trim();
+  if (!place || typeof place !== 'object') return '';
+  return String(place.name || place.label || '').trim();
+};
 
-const hasValidCoords = (place = {}) =>
-  Number.isFinite(Number(place.lat)) && Number.isFinite(Number(place.lng));
+const hasValidCoords = (place) => {
+  if (!place || typeof place !== 'object') return false;
+  return Number.isFinite(Number(place.lat)) && Number.isFinite(Number(place.lng));
+};
 
-const normalizeSelectedLocation = (place = {}) => ({
-  name: toLocationName(place),
-  lat: Number(place.lat),
-  lng: Number(place.lng),
-});
+const normalizeSelectedLocation = (place) => {
+  if (!place || typeof place !== 'object') {
+    return { name: '', lat: NaN, lng: NaN };
+  }
+  return {
+    name: toLocationName(place),
+    lat: Number(place.lat),
+    lng: Number(place.lng),
+  };
+};
 
 const LocationSearch = ({
   label,
