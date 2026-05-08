@@ -1,57 +1,10 @@
-import nodemailer from 'nodemailer';
+import { BrevoClient } from '@getbrevo/brevo';
 import { env } from '../config/env.js';
 import { logger } from './logger.js';
 
-const normalizeAppPassword = (value = '') => String(value).replace(/\s/g, '');
-
-const parseBoolean = (value) => {
-  if (typeof value === 'boolean') return value;
-  if (value === undefined || value === null || value === '') return undefined;
-
-  const normalized = String(value).trim().toLowerCase();
-
-  if (['true', '1', 'yes'].includes(normalized)) return true;
-  if (['false', '0', 'no'].includes(normalized)) return false;
-
-  return undefined;
-};
-
-const emailPort = Number(env.EMAIL_PORT || 587);
-
-const configuredSecure = parseBoolean(env.EMAIL_SECURE);
-
-// Gmail:
-// port 465 => secure true
-// port 587 => secure false + STARTTLS
-const emailSecure =
-  configuredSecure !== undefined ? configuredSecure : emailPort === 465;
-
-const createSmtpTransporter = () =>
-  nodemailer.createTransport({
-    host: env.EMAIL_HOST || 'smtp.gmail.com',
-    port: emailPort,
-    secure: emailSecure,
-    family: 4,
-
-    // Only force STARTTLS for 587
-    requireTLS: emailPort === 587,
-
-    auth: {
-      user: env.EMAIL_USER,
-      pass: normalizeAppPassword(env.EMAIL_PASS),
-    },
-
-    connectionTimeout: 20000,
-    greetingTimeout: 20000,
-    socketTimeout: 30000,
-
-    tls: {
-      servername: env.EMAIL_HOST || 'smtp.gmail.com',
-      minVersion: 'TLSv1.2',
-    },
-  });
-
-const smtpTransporter = createSmtpTransporter();
+const brevo = new BrevoClient({
+  apiKey: env.BREVO_API_KEY,
+});
 
 const getOtpSubject = (type) =>
   type === 'reset' ? 'Password reset OTP' : 'Email verification OTP';
@@ -76,146 +29,96 @@ const getOtpHtml = (otp, type = 'verify') => {
   `;
 };
 
+const parseSender = (value) => {
+  const senderValue = String(value || '').trim();
+  const match = senderValue.match(/^(?:"?([^"]*)"?\s*)?<([^>]+)>$/);
+
+  if (match) {
+    return {
+      name: match[1]?.trim() || 'SahaYatri',
+      email: match[2].trim(),
+    };
+  }
+
+  return {
+    name: 'SahaYatri',
+    email: senderValue,
+  };
+};
+
+const sender = parseSender(env.EMAIL_FROM);
+
 export const getEmailDebugConfig = () => ({
-  provider: env.EMAIL_PROVIDER || 'smtp',
-  host: env.EMAIL_HOST || 'smtp.gmail.com',
-  port: emailPort,
-  secure: emailSecure,
-  requireTLS: emailPort === 587,
-  user: env.EMAIL_USER,
+  provider: 'brevo',
+  senderEmail: sender.email,
+  senderName: sender.name,
 });
 
 export const verifyEmailTransporter = async () => {
-  if ((env.EMAIL_PROVIDER || 'smtp') !== 'smtp') return true;
-
-  try {
-    await smtpTransporter.verify();
-
-    logger.info({
-      event: 'email_transporter_verified',
-      host: env.EMAIL_HOST || 'smtp.gmail.com',
-      port: emailPort,
-      secure: emailSecure,
-      requireTLS: emailPort === 587,
-      user: env.EMAIL_USER,
-    });
-
-    return true;
-  } catch (error) {
+  if (!env.BREVO_API_KEY) {
     logger.error({
-      event: 'email_transporter_verify_failed',
-      error: error.message,
-      code: error.code,
-      command: error.command,
-      host: env.EMAIL_HOST || 'smtp.gmail.com',
-      port: emailPort,
-      secure: emailSecure,
-      requireTLS: emailPort === 587,
-      user: env.EMAIL_USER,
+      event: 'email_provider_not_configured',
+      provider: 'brevo',
+      reason: 'BREVO_API_KEY is missing',
     });
-
     return false;
   }
+
+  if (!sender.email) {
+    logger.error({
+      event: 'email_provider_not_configured',
+      provider: 'brevo',
+      reason: 'EMAIL_FROM is missing',
+    });
+    return false;
+  }
+
+  logger.info({
+    event: 'email_provider_ready',
+    provider: 'brevo',
+    senderEmail: sender.email,
+  });
+
+  return true;
 };
 
 export const sendOtpEmail = async (to, otp, type = 'verify') => {
   const subject = getOtpSubject(type);
-  const provider = env.EMAIL_PROVIDER || 'smtp';
-  const html = getOtpHtml(otp, type);
+  const htmlContent = getOtpHtml(otp, type);
 
   try {
-    let info;
-    if (provider === 'smtp') {
-      info = await smtpTransporter.sendMail({
-        from: env.EMAIL_FROM || `SahaYatri <${env.EMAIL_USER}>`,
-        to,
-        subject,
-        html,
-      });
-    } else if (provider === 'resend') {
-      if (!env.RESEND_API_KEY) {
-        throw new Error('RESEND_API_KEY is missing');
-      }
+    const response = await brevo.transactionalEmails.sendTransacEmail({
+      sender,
+      to: [{ email: to }],
+      subject,
+      htmlContent,
+    });
 
-      const resp = await fetch('https://api.resend.com/emails', {
-        method: 'POST',
-        headers: {
-          Authorization: `Bearer ${env.RESEND_API_KEY}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          from: env.EMAIL_FROM || 'SahaYatri <onboarding@resend.dev>',
-          to: [to],
-          subject,
-          html,
-        }),
-      });
-
-      const body = await resp.json();
-      if (!resp.ok) {
-        throw new Error(body?.message || `Resend failed with status ${resp.status}`);
-      }
-
-      info = { messageId: body?.id || 'resend-accepted' };
-    } else if (provider === 'sendgrid') {
-      if (!env.SENDGRID_API_KEY) {
-        throw new Error('SENDGRID_API_KEY is missing');
-      }
-
-      const resp = await fetch('https://api.sendgrid.com/v3/mail/send', {
-        method: 'POST',
-        headers: {
-          Authorization: `Bearer ${env.SENDGRID_API_KEY}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          personalizations: [{ to: [{ email: to }] }],
-          from: { email: (env.EMAIL_FROM || '').match(/<(.+)>/)?.[1] || env.EMAIL_USER },
-          subject,
-          content: [{ type: 'text/html', value: html }],
-        }),
-      });
-
-      if (!resp.ok) {
-        const body = await resp.text();
-        throw new Error(`SendGrid failed with status ${resp.status}: ${body}`);
-      }
-
-      info = { messageId: resp.headers.get('x-message-id') || 'sendgrid-accepted' };
-    } else {
-      throw new Error(`Unsupported EMAIL_PROVIDER: ${provider}`);
-    }
+    const messageId =
+      response?.messageId ||
+      (Array.isArray(response?.messageIds) ? response.messageIds[0] : undefined) ||
+      'brevo-accepted';
 
     logger.info({
       event: 'email_sent',
-      provider,
+      provider: 'brevo',
       to,
       subject,
-      messageId: info.messageId,
-      host: env.EMAIL_HOST || 'smtp.gmail.com',
-      port: emailPort,
-      secure: emailSecure,
-      requireTLS: emailPort === 587,
-      user: env.EMAIL_USER,
+      messageId,
+      senderEmail: sender.email,
     });
 
-    return info;
+    return { messageId };
   } catch (error) {
     logger.error({
       event: 'email_failed',
-      provider,
+      provider: 'brevo',
       to,
       subject,
-      error: error.message,
-      code: error.code,
-      command: error.command,
-      response: error.response,
-      responseCode: error.responseCode,
-      host: env.EMAIL_HOST || 'smtp.gmail.com',
-      port: emailPort,
-      secure: emailSecure,
-      requireTLS: emailPort === 587,
-      user: env.EMAIL_USER,
+      senderEmail: sender.email,
+      error: error?.message,
+      statusCode: error?.statusCode || error?.rawResponse?.status,
+      responseBody: error?.body || error?.rawResponse?.body,
     });
 
     throw error;

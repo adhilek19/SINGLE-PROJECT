@@ -16,18 +16,10 @@ const envSchema = joi
     REFRESH_SECRET: joi.string().min(32).required(),
     REFRESH_EXPIRES_IN: joi.string().default('7d'),
 
-    EMAIL_HOST: joi.string().default('smtp.gmail.com'),
-    // Gmail STARTTLS uses 587 + secure=false. Port 465 uses secure=true.
-    EMAIL_PORT: joi.number().valid(465, 587).default(587),
-    EMAIL_SECURE: joi.boolean().truthy('true').falsy('false').optional(),
-    EMAIL_USER: joi.string().required(),
-    EMAIL_PASS: joi.string().required(),
-    EMAIL_FROM: joi.string().allow('').optional(),
-    EMAIL_PROVIDER: joi.string().valid('smtp', 'resend', 'sendgrid').default('smtp'),
-    RESEND_API_KEY: joi.string().allow('').optional(),
-    SENDGRID_API_KEY: joi.string().allow('').optional(),
+    EMAIL_FROM: joi.string().trim().required(),
+    BREVO_API_KEY: joi.string().trim().required(),
     // In development/local, OTP endpoints should not break the whole auth flow
-    // when SMTP is blocked by hosting/network. In production keep this false.
+    // when email delivery fails due provider/network issues. In production keep this false.
     EMAIL_FAIL_OPEN: joi.boolean().truthy('true').falsy('false').optional(),
     EMAIL_LOG_OTP: joi.boolean().truthy('true').falsy('false').optional(),
 
@@ -52,14 +44,6 @@ if (error) {
   throw new Error(`ENV validation failed: ${error.message}`);
 }
 
-const port = Number(value.EMAIL_PORT || 587);
-
-// If EMAIL_SECURE is not explicitly set, choose the correct value by port.
-// 465 = implicit TLS true, 587 = STARTTLS false.
-if (value.EMAIL_SECURE === undefined) {
-  value.EMAIL_SECURE = port === 465;
-}
-
 // Development fallback only. Set EMAIL_FAIL_OPEN=false in production.
 if (value.EMAIL_FAIL_OPEN === undefined) {
   value.EMAIL_FAIL_OPEN = value.NODE_ENV !== 'production';
@@ -67,10 +51,6 @@ if (value.EMAIL_FAIL_OPEN === undefined) {
 
 if (value.EMAIL_LOG_OTP === undefined) {
   value.EMAIL_LOG_OTP = value.NODE_ENV !== 'production';
-}
-
-if (!value.EMAIL_FROM) {
-  value.EMAIL_FROM = `SahaYatri <${value.EMAIL_USER}>`;
 }
 
 export const env = value;

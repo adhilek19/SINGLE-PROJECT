@@ -111,7 +111,7 @@ const deliverOtpOrFallback = async ({ email, otp, type }) => {
     }
 
     throw new AppError(
-      'OTP email sending failed. Set EMAIL_PORT=587 and EMAIL_SECURE=false on Render, use Gmail App Password, then redeploy.',
+      'OTP email sending failed. Please verify BREVO_API_KEY and EMAIL_FROM, then redeploy.',
       502
     );
   }
