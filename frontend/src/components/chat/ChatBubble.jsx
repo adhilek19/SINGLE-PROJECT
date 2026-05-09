@@ -1,7 +1,14 @@
 import { memo, useMemo, useState } from 'react';
 import { AlertCircle, Check, CheckCheck, Clock3, SmilePlus } from 'lucide-react';
 
-const QUICK_REACTION_EMOJIS = ['👍', '❤️', '😂', '🔥', '🙏', '😮'];
+const QUICK_REACTION_EMOJIS = [
+  '\u{1F44D}',
+  '\u{2764}\u{FE0F}',
+  '\u{1F602}',
+  '\u{1F525}',
+  '\u{1F64F}',
+  '\u{1F62E}',
+];
 
 const toId = (value) =>
   (value && typeof value === 'object' ? value._id : value)?.toString?.() || '';
@@ -12,6 +19,13 @@ const formatTime = (value) => {
     hour: '2-digit',
     minute: '2-digit',
   });
+};
+
+const formatDuration = (seconds = 0) => {
+  const safeSeconds = Math.max(0, Math.round(Number(seconds || 0)));
+  const mins = String(Math.floor(safeSeconds / 60)).padStart(2, '0');
+  const secs = String(safeSeconds % 60).padStart(2, '0');
+  return `${mins}:${secs}`;
 };
 
 const toPrettySize = (size = 0) => {
@@ -58,6 +72,29 @@ const MediaContent = ({ message, isOwn }) => {
 
   if (message.type === 'audio') {
     return <audio src={message.url} controls className="w-full" />;
+  }
+
+  if (message.type === 'voice') {
+    const waveform = Array.isArray(message.waveform) ? message.waveform : [];
+    return (
+      <div className="w-full space-y-2">
+        {waveform.length ? (
+          <div className="flex items-end gap-0.5 rounded-lg bg-black/10 px-2 py-1">
+            {waveform.map((value, index) => (
+              <span
+                key={`${index}-${value}`}
+                className={`w-1 rounded-full ${isOwn ? 'bg-emerald-200/90' : 'bg-emerald-500/80'}`}
+                style={{ height: `${Math.max(3, Math.min(20, Number(value || 0) / 5))}px` }}
+              />
+            ))}
+          </div>
+        ) : null}
+        <audio src={message.url} controls className="w-full" />
+        <p className={`text-xs font-semibold ${tintClass}`}>
+          Voice note {Number(message.duration || 0) > 0 ? `| ${formatDuration(message.duration)}` : ''}
+        </p>
+      </div>
+    );
   }
 
   return (
@@ -230,3 +267,4 @@ const ChatBubble = ({
 };
 
 export default memo(ChatBubble);
+

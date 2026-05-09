@@ -261,12 +261,29 @@ export const chatService = {
   sendMessage: ({ chatId, text, clientMessageId }) =>
     api.post('/messages', { chatId, text, clientMessageId }),
 
-  sendMediaMessage: ({ chatId, file, onUploadProgress, clientMessageId }) => {
+  sendMediaMessage: ({
+    chatId,
+    file,
+    onUploadProgress,
+    clientMessageId,
+    type,
+    duration,
+    waveform,
+  }) => {
     const formData = new FormData();
     formData.append('chatId', chatId);
     formData.append('media', file);
     if (clientMessageId) {
       formData.append('clientMessageId', clientMessageId);
+    }
+    if (type) {
+      formData.append('type', type);
+    }
+    if (Number.isFinite(Number(duration)) && Number(duration) > 0) {
+      formData.append('duration', String(Number(duration)));
+    }
+    if (Array.isArray(waveform) && waveform.length) {
+      formData.append('waveform', JSON.stringify(waveform));
     }
 
     return api.post('/messages/media', formData, {
@@ -280,6 +297,10 @@ export const chatService = {
     api.patch(`/messages/${messageId}/reaction`, { emoji }),
 
   deleteMessage: (messageId) => api.delete(`/messages/${messageId}`),
+};
+
+export const callService = {
+  getIceServers: () => api.get('/calls/ice-servers'),
 };
 
 export const reviewService = {

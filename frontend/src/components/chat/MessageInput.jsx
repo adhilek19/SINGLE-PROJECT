@@ -1,7 +1,19 @@
 import { useEffect, useRef, useState } from 'react';
 import { Paperclip, Smile, X } from 'lucide-react';
+import VoiceRecorder from './VoiceRecorder';
 
-const QUICK_EMOJIS = ['😀', '😂', '😍', '👍', '🙏', '🔥', '🎉', '❤️', '😅', '😎'];
+const QUICK_EMOJIS = [
+  '\u{1F600}',
+  '\u{1F602}',
+  '\u{1F60D}',
+  '\u{1F44D}',
+  '\u{1F64F}',
+  '\u{1F525}',
+  '\u{1F389}',
+  '\u{2764}\u{FE0F}',
+  '\u{1F605}',
+  '\u{1F60E}',
+];
 
 const toPrettySize = (size = 0) => {
   const bytes = Number(size || 0);
@@ -27,6 +39,7 @@ const getFileKind = (file) => {
 const MessageInput = ({
   onSend,
   onSendMedia,
+  onSendVoice,
   onTypingStart,
   onTypingStop,
   disabled = false,
@@ -267,16 +280,27 @@ const MessageInput = ({
           disabled={disabled || mediaUploading}
           className="max-h-32 min-h-[44px] flex-1 resize-none rounded-2xl border border-slate-300 px-3 py-2 text-sm outline-none focus:border-emerald-500 focus:ring-2 focus:ring-emerald-100 disabled:opacity-60"
         />
-        <button
-          type="submit"
-          disabled={disabled || mediaUploading || !String(value || '').trim()}
-          className="h-11 rounded-2xl bg-emerald-600 px-5 text-sm font-bold text-white disabled:opacity-50"
-        >
-          Send
-        </button>
+        {String(value || '').trim() ? (
+          <button
+            type="submit"
+            disabled={disabled || mediaUploading || !String(value || '').trim()}
+            className="h-11 rounded-2xl bg-emerald-600 px-5 text-sm font-bold text-white disabled:opacity-50"
+          >
+            Send
+          </button>
+        ) : selectedFile ? (
+          <span className="h-11 w-11" />
+        ) : (
+          <VoiceRecorder
+            onSendVoice={onSendVoice}
+            disabled={disabled}
+            uploading={mediaUploading}
+          />
+        )}
       </form>
     </div>
   );
 };
 
 export default MessageInput;
+

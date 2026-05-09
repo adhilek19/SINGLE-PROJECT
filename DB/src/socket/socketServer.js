@@ -12,6 +12,7 @@ import {
   userRoomName,
 } from '../services/chatAccessService.js';
 import { messageService } from '../services/messageService.js';
+import { callService } from '../services/callService.js';
 
 const RIDE_ROOM_PREFIX = 'ride:';
 const rideRoomName = (rideId) => `${RIDE_ROOM_PREFIX}${rideId}`;
@@ -110,6 +111,14 @@ const emitDelivered = ({ io, chatId, messageId, userId }) => {
   });
 };
 
+const relayToCallPeer = ({ io, targetUserId, event, payload = {} }) => {
+  if (!targetUserId) return;
+  io.to(userRoomName(targetUserId)).emit(event, {
+    ...payload,
+    at: new Date().toISOString(),
+  });
+};
+
 export const initSocket = ({ httpServer }) => {
   const io = new Server(httpServer, {
     cors: {
@@ -122,6 +131,90 @@ export const initSocket = ({ httpServer }) => {
   });
 
   setSocketIO(io);
+
+  const callSessions = new Map();
+  const userCallLocks = new Map();
+
+  const lockUserForCall = ({ userId, callId }) => {
+    const safeUserId = toId(userId);
+    const safeCallId = toId(callId);
+    if (!safeUserId || !safeCallId) return;
+    userCallLocks.set(safeUserId, safeCallId);
+  };
+
+  const unlockUserForCall = ({ userId, callId }) => {
+    const safeUserId = toId(userId);
+    const safeCallId = toId(callId);
+    if (!safeUserId) return;
+    const current = toId(userCallLocks.get(safeUserId));
+    if (!current) return;
+    if (safeCallId && current !== safeCallId) return;
+    userCallLocks.delete(safeUserId);
+  };
+
+  const clearCallSession = (callId) => {
+    const safeCallId = toId(callId);
+    if (!safeCallId) return;
+    const session = callSessions.get(safeCallId);
+    if (!session) return;
+
+    if (session.timeoutHandle) {
+      clearTimeout(session.timeoutHandle);
+    }
+
+    unlockUserForCall({ userId: session.callerId, callId: safeCallId });
+    unlockUserForCall({ userId: session.calleeId, callId: safeCallId });
+    callSessions.delete(safeCallId);
+  };
+
+  const finalizeCallSession = async ({
+    session,
+    status,
+    endedBy = null,
+    failureReason = '',
+  }) => {
+    const safeStatus = String(status || '').trim() || 'ended';
+    try {
+      await callService.updateCallStatus({
+        callId: session.callId,
+        status: safeStatus,
+        endedBy,
+        failureReason,
+      });
+    } catch {
+      // do not block signaling cleanup on call log persistence failures
+    }
+
+    relayToCallPeer({
+      io,
+      targetUserId: session.callerId,
+      event: safeStatus === 'failed' ? 'call_failed' : 'call_ended',
+      payload: {
+        callId: session.callId,
+        chatId: session.chatId,
+        rideId: session.rideId,
+        status: safeStatus,
+        endedBy: toId(endedBy),
+        reason: failureReason || '',
+      },
+    });
+
+    relayToCallPeer({
+      io,
+      targetUserId: session.calleeId,
+      event: safeStatus === 'failed' ? 'call_failed' : 'call_ended',
+      payload: {
+        callId: session.callId,
+        chatId: session.chatId,
+        rideId: session.rideId,
+        status: safeStatus,
+        endedBy: toId(endedBy),
+        reason: failureReason || '',
+      },
+    });
+
+    clearCallSession(session.callId);
+  };
 
   io.use(async (socket, next) => {
     try {
@@ -390,6 +483,515 @@ export const initSocket = ({ httpServer }) => {
       }
     });
 
+    socket.on('call_user', async (payload = {}, ack) => {
+      try {
+        const chatId = String(payload.chatId || '').trim();
+        if (!chatId) throw new Error('chatId is required');
+
+        if (userCallLocks.has(currentUserId)) {
+          relayToCallPeer({
+            io,
+            targetUserId: currentUserId,
+            event: 'call_busy',
+            payload: {
+              chatId,
+              reason: 'You are already in another call',
+              status: 'busy',
+            },
+          });
+          throw new Error('You are already in another call');
+        }
+
+        const access = await ensureChatAccess({ chatId, userId: socket.user._id });
+        const calleeId = toId(access.otherUserId);
+        const callerId = currentUserId;
+        if (!calleeId || !callerId) throw new Error('Invalid call participants');
+
+        if (userCallLocks.has(calleeId)) {
+          let busyCall = null;
+          try {
+            busyCall = await callService.createCallLog({
+              chatId: access.chatId,
+              rideId: access.ride?._id,
+              callerId,
+              calleeId,
+              status: 'busy',
+              failureReason: 'callee_busy',
+            });
+            if (busyCall?._id) {
+              await callService.updateCallStatus({
+                callId: busyCall._id,
+                status: 'busy',
+                endedBy: callerId,
+                failureReason: 'callee_busy',
+              });
+            }
+          } catch {
+            // do not block signaling on call log creation failure
+          }
+
+          relayToCallPeer({
+            io,
+            targetUserId: callerId,
+            event: 'call_busy',
+            payload: {
+              callId: toId(busyCall?._id),
+              chatId: access.chatId,
+              calleeId,
+              status: 'busy',
+              reason: 'User is busy on another call',
+            },
+          });
+          throw new Error('User is busy on another call');
+        }
+
+        const calleeSockets = await io.in(userRoomName(calleeId)).fetchSockets();
+        if (!calleeSockets.length) {
+          let missedCall = null;
+          try {
+            missedCall = await callService.createCallLog({
+              chatId: access.chatId,
+              rideId: access.ride?._id,
+              callerId,
+              calleeId,
+              status: 'missed',
+              failureReason: 'callee_offline',
+            });
+            await callService.updateCallStatus({
+              callId: missedCall._id,
+              status: 'missed',
+              failureReason: 'callee_offline',
+              endedBy: callerId,
+            });
+          } catch {
+            // do not block signaling on call log creation failure
+          }
+
+          relayToCallPeer({
+            io,
+            targetUserId: callerId,
+            event: 'call_failed',
+            payload: {
+              callId: toId(missedCall?._id),
+              chatId: access.chatId,
+              calleeId,
+              status: 'missed',
+              reason: 'User is offline',
+            },
+          });
+          throw new Error('User is offline');
+        }
+
+        const callLog = await callService.createCallLog({
+          chatId: access.chatId,
+          rideId: access.ride?._id,
+          callerId,
+          calleeId,
+          status: 'ringing',
+        });
+
+        const callId = toId(callLog?._id);
+        const session = {
+          callId,
+          chatId: toId(access.chatId),
+          rideId: toId(access.ride?._id),
+          callerId,
+          calleeId,
+          status: 'ringing',
+          createdAt: new Date().toISOString(),
+          timeoutHandle: null,
+        };
+
+        lockUserForCall({ userId: callerId, callId });
+        lockUserForCall({ userId: calleeId, callId });
+
+        session.timeoutHandle = setTimeout(async () => {
+          const current = callSessions.get(callId);
+          if (!current || current.status !== 'ringing') return;
+
+          try {
+            await callService.updateCallStatus({
+              callId,
+              status: 'missed',
+              failureReason: 'no_answer',
+            });
+          } catch {
+            // ignore timeout persistence errors
+          }
+
+          relayToCallPeer({
+            io,
+            targetUserId: current.callerId,
+            event: 'call_failed',
+            payload: {
+              callId: current.callId,
+              chatId: current.chatId,
+              rideId: current.rideId,
+              status: 'missed',
+              reason: 'Call missed',
+            },
+          });
+
+          relayToCallPeer({
+            io,
+            targetUserId: current.calleeId,
+            event: 'call_ended',
+            payload: {
+              callId: current.callId,
+              chatId: current.chatId,
+              rideId: current.rideId,
+              status: 'missed',
+              reason: 'Call missed',
+            },
+          });
+
+          clearCallSession(callId);
+        }, callService.getRingTimeoutMs());
+
+        callSessions.set(callId, session);
+
+        relayToCallPeer({
+          io,
+          targetUserId: calleeId,
+          event: 'incoming_call',
+          payload: {
+            callId,
+            chatId: access.chatId,
+            rideId: toId(access.ride?._id),
+            from: {
+              _id: callerId,
+              name: socket.user?.name || 'User',
+              profilePic: socket.user?.profilePic || '',
+            },
+            status: 'ringing',
+          },
+        });
+
+        if (typeof ack === 'function') {
+          ack({
+            ok: true,
+            callId,
+            chatId: access.chatId,
+            calleeId,
+            status: 'ringing',
+          });
+        }
+      } catch (err) {
+        if (typeof ack === 'function') {
+          ack({ ok: false, message: err.message || 'call_user failed' });
+        }
+      }
+    });
+
+    socket.on('call_accepted', async (payload = {}, ack) => {
+      try {
+        const callId = String(payload.callId || '').trim();
+        if (!callId) throw new Error('callId is required');
+
+        const session = callSessions.get(callId);
+        if (!session) throw new Error('Call session not found');
+
+        await ensureChatAccess({ chatId: session.chatId, userId: socket.user._id });
+        if (session.calleeId !== currentUserId) {
+          throw new Error('Only callee can accept this call');
+        }
+        if (session.status !== 'ringing') {
+          throw new Error('Call is no longer ringing');
+        }
+
+        session.status = 'connected';
+        session.answeredAt = new Date().toISOString();
+        if (session.timeoutHandle) {
+          clearTimeout(session.timeoutHandle);
+          session.timeoutHandle = null;
+        }
+        callSessions.set(callId, session);
+        try {
+          await callService.updateCallStatus({
+            callId,
+            status: 'connected',
+            answeredAt: session.answeredAt,
+          });
+        } catch {
+          // do not block signaling when call-log persistence fails
+        }
+
+        relayToCallPeer({
+          io,
+          targetUserId: session.callerId,
+          event: 'call_accepted',
+          payload: {
+            callId: session.callId,
+            chatId: session.chatId,
+            rideId: session.rideId,
+            acceptedBy: currentUserId,
+            status: 'connected',
+          },
+        });
+
+        relayToCallPeer({
+          io,
+          targetUserId: session.calleeId,
+          event: 'call_accepted',
+          payload: {
+            callId: session.callId,
+            chatId: session.chatId,
+            rideId: session.rideId,
+            acceptedBy: currentUserId,
+            status: 'connected',
+          },
+        });
+
+        if (typeof ack === 'function') {
+          ack({ ok: true, callId: session.callId, status: 'connected' });
+        }
+      } catch (err) {
+        if (typeof ack === 'function') {
+          ack({ ok: false, message: err.message || 'call_accepted failed' });
+        }
+      }
+    });
+
+    socket.on('call_rejected', async (payload = {}, ack) => {
+      try {
+        const callId = String(payload.callId || '').trim();
+        const reason = String(payload.reason || '').trim();
+        if (!callId) throw new Error('callId is required');
+
+        const session = callSessions.get(callId);
+        if (!session) throw new Error('Call session not found');
+
+        await ensureChatAccess({ chatId: session.chatId, userId: socket.user._id });
+        if (session.calleeId !== currentUserId) {
+          throw new Error('Only callee can reject this call');
+        }
+
+        try {
+          await callService.updateCallStatus({
+            callId,
+            status: 'rejected',
+            endedBy: socket.user._id,
+            failureReason: reason || 'callee_rejected',
+          });
+        } catch {
+          // do not block cleanup on persistence failures
+        }
+
+        relayToCallPeer({
+          io,
+          targetUserId: session.callerId,
+          event: 'call_rejected',
+          payload: {
+            callId: session.callId,
+            chatId: session.chatId,
+            rideId: session.rideId,
+            rejectedBy: currentUserId,
+            status: 'rejected',
+            reason: reason || '',
+          },
+        });
+
+        relayToCallPeer({
+          io,
+          targetUserId: session.calleeId,
+          event: 'call_rejected',
+          payload: {
+            callId: session.callId,
+            chatId: session.chatId,
+            rideId: session.rideId,
+            rejectedBy: currentUserId,
+            status: 'rejected',
+            reason: reason || '',
+          },
+        });
+
+        clearCallSession(callId);
+
+        if (typeof ack === 'function') {
+          ack({ ok: true, callId, status: 'rejected' });
+        }
+      } catch (err) {
+        if (typeof ack === 'function') {
+          ack({ ok: false, message: err.message || 'call_rejected failed' });
+        }
+      }
+    });
+
+    socket.on('call_ended', async (payload = {}, ack) => {
+      try {
+        const callId = String(payload.callId || '').trim();
+        if (!callId) throw new Error('callId is required');
+
+        const session = callSessions.get(callId);
+        if (!session) throw new Error('Call session not found');
+
+        await ensureChatAccess({ chatId: session.chatId, userId: socket.user._id });
+        if (![session.callerId, session.calleeId].includes(currentUserId)) {
+          throw new Error('Only call participants can end this call');
+        }
+
+        await finalizeCallSession({
+          session,
+          status: 'ended',
+          endedBy: socket.user._id,
+          failureReason: '',
+        });
+
+        if (typeof ack === 'function') {
+          ack({ ok: true, callId, status: 'ended' });
+        }
+      } catch (err) {
+        if (typeof ack === 'function') {
+          ack({ ok: false, message: err.message || 'call_ended failed' });
+        }
+      }
+    });
+
+    socket.on('call_failed', async (payload = {}, ack) => {
+      try {
+        const callId = String(payload.callId || '').trim();
+        const reason = String(payload.reason || '').trim();
+        if (!callId) throw new Error('callId is required');
+
+        const session = callSessions.get(callId);
+        if (!session) throw new Error('Call session not found');
+
+        await ensureChatAccess({ chatId: session.chatId, userId: socket.user._id });
+        if (![session.callerId, session.calleeId].includes(currentUserId)) {
+          throw new Error('Only call participants can fail this call');
+        }
+
+        await finalizeCallSession({
+          session,
+          status: 'failed',
+          endedBy: socket.user._id,
+          failureReason: reason || 'call_failed',
+        });
+
+        if (typeof ack === 'function') {
+          ack({ ok: true, callId, status: 'failed' });
+        }
+      } catch (err) {
+        if (typeof ack === 'function') {
+          ack({ ok: false, message: err.message || 'call_failed failed' });
+        }
+      }
+    });
+
+    socket.on('webrtc_offer', async (payload = {}, ack) => {
+      try {
+        const callId = String(payload.callId || '').trim();
+        const sdp = payload.sdp;
+        if (!callId) throw new Error('callId is required');
+        if (!sdp) throw new Error('Offer SDP is required');
+
+        const session = callSessions.get(callId);
+        if (!session) throw new Error('Call session not found');
+        await ensureChatAccess({ chatId: session.chatId, userId: socket.user._id });
+        if (![session.callerId, session.calleeId].includes(currentUserId)) {
+          throw new Error('Only call participants can send offer');
+        }
+
+        const targetUserId =
+          currentUserId === session.callerId ? session.calleeId : session.callerId;
+
+        relayToCallPeer({
+          io,
+          targetUserId,
+          event: 'webrtc_offer',
+          payload: {
+            callId: session.callId,
+            chatId: session.chatId,
+            rideId: session.rideId,
+            fromUserId: currentUserId,
+            sdp,
+          },
+        });
+
+        if (typeof ack === 'function') ack({ ok: true });
+      } catch (err) {
+        if (typeof ack === 'function') {
+          ack({ ok: false, message: err.message || 'webrtc_offer failed' });
+        }
+      }
+    });
+
+    socket.on('webrtc_answer', async (payload = {}, ack) => {
+      try {
+        const callId = String(payload.callId || '').trim();
+        const sdp = payload.sdp;
+        if (!callId) throw new Error('callId is required');
+        if (!sdp) throw new Error('Answer SDP is required');
+
+        const session = callSessions.get(callId);
+        if (!session) throw new Error('Call session not found');
+        await ensureChatAccess({ chatId: session.chatId, userId: socket.user._id });
+        if (![session.callerId, session.calleeId].includes(currentUserId)) {
+          throw new Error('Only call participants can send answer');
+        }
+
+        const targetUserId =
+          currentUserId === session.callerId ? session.calleeId : session.callerId;
+
+        relayToCallPeer({
+          io,
+          targetUserId,
+          event: 'webrtc_answer',
+          payload: {
+            callId: session.callId,
+            chatId: session.chatId,
+            rideId: session.rideId,
+            fromUserId: currentUserId,
+            sdp,
+          },
+        });
+
+        if (typeof ack === 'function') ack({ ok: true });
+      } catch (err) {
+        if (typeof ack === 'function') {
+          ack({ ok: false, message: err.message || 'webrtc_answer failed' });
+        }
+      }
+    });
+
+    socket.on('webrtc_ice_candidate', async (payload = {}, ack) => {
+      try {
+        const callId = String(payload.callId || '').trim();
+        const candidate = payload.candidate;
+        if (!callId) throw new Error('callId is required');
+        if (!candidate) throw new Error('ICE candidate is required');
+
+        const session = callSessions.get(callId);
+        if (!session) throw new Error('Call session not found');
+        await ensureChatAccess({ chatId: session.chatId, userId: socket.user._id });
+        if (![session.callerId, session.calleeId].includes(currentUserId)) {
+          throw new Error('Only call participants can send candidate');
+        }
+
+        const targetUserId =
+          currentUserId === session.callerId ? session.calleeId : session.callerId;
+
+        relayToCallPeer({
+          io,
+          targetUserId,
+          event: 'webrtc_ice_candidate',
+          payload: {
+            callId: session.callId,
+            chatId: session.chatId,
+            rideId: session.rideId,
+            fromUserId: currentUserId,
+            candidate,
+          },
+        });
+
+        if (typeof ack === 'function') ack({ ok: true });
+      } catch (err) {
+        if (typeof ack === 'function') {
+          ack({ ok: false, message: err.message || 'webrtc_ice_candidate failed' });
+        }
+      }
+    });
+
     socket.on('joinRide', async (payload = {}, ack) => {
       try {
         const rideId = String(payload.rideId || '').trim();
@@ -501,9 +1103,20 @@ export const initSocket = ({ httpServer }) => {
       }
     });
 
-    socket.on('disconnect', () => {
+    socket.on('disconnect', async () => {
       const becameOffline = decreaseOnlineCount(currentUserId);
       if (becameOffline) {
+        const activeCallId = toId(userCallLocks.get(currentUserId));
+        const activeSession = activeCallId ? callSessions.get(activeCallId) : null;
+        if (activeSession) {
+          await finalizeCallSession({
+            session: activeSession,
+            status: activeSession.status === 'connected' ? 'ended' : 'missed',
+            endedBy: socket.user._id,
+            failureReason: 'peer_disconnected',
+          });
+        }
+
         const lastSeenAt = new Date().toISOString();
         lastSeenByUser.set(currentUserId, lastSeenAt);
         io.emit('user_offline', {

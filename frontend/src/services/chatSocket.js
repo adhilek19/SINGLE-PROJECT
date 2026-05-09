@@ -87,6 +87,30 @@ export const sendMessageSeen = (messageId) =>
 export const sendMessageReaction = ({ messageId, emoji }) =>
   emitWithAck('message_reaction', { messageId, emoji });
 
+export const callUser = ({ chatId }) =>
+  emitWithAck('call_user', { chatId });
+
+export const acceptIncomingCall = ({ callId }) =>
+  emitWithAck('call_accepted', { callId });
+
+export const rejectIncomingCall = ({ callId, reason = '' }) =>
+  emitWithAck('call_rejected', { callId, reason });
+
+export const endActiveCall = ({ callId }) =>
+  emitWithAck('call_ended', { callId });
+
+export const failActiveCall = ({ callId, reason = '' }) =>
+  emitWithAck('call_failed', { callId, reason });
+
+export const sendWebrtcOffer = ({ callId, sdp }) =>
+  emitWithAck('webrtc_offer', { callId, sdp });
+
+export const sendWebrtcAnswer = ({ callId, sdp }) =>
+  emitWithAck('webrtc_answer', { callId, sdp });
+
+export const sendWebrtcIceCandidate = ({ callId, candidate }) =>
+  emitWithAck('webrtc_ice_candidate', { callId, candidate });
+
 export const onReceiveMessage = (handler) => subscribe('receive_message', handler);
 export const onMessageSeen = (handler) => subscribe('message_seen', handler);
 export const onMessageDelivered = (handler) =>
@@ -108,3 +132,14 @@ export const onRideJoinAccepted = (handler) =>
   subscribe('ride_join_accepted', handler);
 export const onRideJoinRejected = (handler) =>
   subscribe('ride_join_rejected', handler);
+
+export const onIncomingCall = (handler) => subscribe('incoming_call', handler);
+export const onCallAccepted = (handler) => subscribe('call_accepted', handler);
+export const onCallRejected = (handler) => subscribe('call_rejected', handler);
+export const onCallEnded = (handler) => subscribe('call_ended', handler);
+export const onCallBusy = (handler) => subscribe('call_busy', handler);
+export const onCallFailed = (handler) => subscribe('call_failed', handler);
+export const onWebrtcOffer = (handler) => subscribe('webrtc_offer', handler);
+export const onWebrtcAnswer = (handler) => subscribe('webrtc_answer', handler);
+export const onWebrtcIceCandidate = (handler) =>
+  subscribe('webrtc_ice_candidate', handler);

@@ -11,6 +11,16 @@ import { cloudinary } from '../utils/cloudinary.js';
 import { BadRequest } from '../utils/AppError.js';
 import { env } from '../config/env.js';
 
+const allowedVoiceMimeTypes = new Set([
+  'audio/webm',
+  'audio/mp3',
+  'audio/mpeg',
+  'audio/ogg',
+  'audio/wav',
+  'audio/x-wav',
+  'audio/wave',
+]);
+
 const emitMessageDelivered = ({ chatId, messageId, userId }) => {
   const io = getSocketIO();
   if (!io) return;
@@ -57,6 +67,23 @@ const detectMessageType = (mimeType = '') => {
   if (mimeType.startsWith('video/')) return 'video';
   if (mimeType.startsWith('audio/')) return 'audio';
   return 'file';
+};
+
+const normalizeMimeType = (mimeType = '') =>
+  String(mimeType || '')
+    .toLowerCase()
+    .split(';')[0]
+    .trim();
+
+const parseWaveform = (value) => {
+  if (Array.isArray(value)) return value;
+  if (typeof value !== 'string' || !value.trim()) return [];
+  try {
+    const parsed = JSON.parse(value);
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
 };
 
 const uploadBufferToCloudinary = (file, folder) =>
@@ -127,11 +154,28 @@ export const sendMessage = async (req, res, next) => {
 export const sendMediaMessage = async (req, res, next) => {
   let uploadedPublicId = '';
   try {
-    const { chatId, clientMessageId } = req.body || {};
+    const { chatId, clientMessageId, type: requestedType } = req.body || {};
     if (!chatId) throw BadRequest('chatId is required');
     if (!req.file) throw BadRequest('Media file is required');
 
     await ensureChatAccess({ chatId, userId: req.userId });
+
+    const isVoiceMessage = String(requestedType || '').trim() === 'voice';
+    if (isVoiceMessage) {
+      const normalizedMimeType = normalizeMimeType(req.file.mimetype);
+      if (!allowedVoiceMimeTypes.has(normalizedMimeType)) {
+        throw BadRequest('Unsupported voice note audio format');
+      }
+
+      const maxVoiceBytes = Number(env.CHAT_VOICE_MAX_SIZE_MB || 10) * 1024 * 1024;
+      if (Number(req.file.size || 0) > maxVoiceBytes) {
+        throw BadRequest(
+          `Voice note too large. Max allowed size is ${Number(
+            env.CHAT_VOICE_MAX_SIZE_MB || 10
+          )}MB`
+        );
+      }
+    }
 
     const uploadResult = await uploadBufferToCloudinary(
       req.file,
@@ -139,13 +183,35 @@ export const sendMediaMessage = async (req, res, next) => {
     );
     uploadedPublicId = uploadResult?.public_id || '';
 
+    const duration = Number(req.body?.duration || 0);
+    const waveform = parseWaveform(req.body?.waveform)
+      .map((entry) => Number(entry))
+      .filter((entry) => Number.isFinite(entry) && entry >= 0)
+      .slice(0, 64);
+
+    if (isVoiceMessage) {
+      if (!Number.isFinite(duration) || duration <= 0) {
+        throw BadRequest('Voice note duration is required');
+      }
+
+      if (duration > Number(env.CHAT_VOICE_MAX_DURATION_SEC || 180)) {
+        throw BadRequest(
+          `Voice note exceeds max duration of ${Number(
+            env.CHAT_VOICE_MAX_DURATION_SEC || 180
+          )} seconds`
+        );
+      }
+    }
+
     const media = {
       url: uploadResult?.secure_url || '',
       publicId: uploadResult?.public_id || '',
-      type: detectMessageType(req.file.mimetype),
+      type: isVoiceMessage ? 'voice' : detectMessageType(req.file.mimetype),
       fileName: req.file.originalname,
       fileSize: req.file.size,
       mimeType: req.file.mimetype,
+      duration: Number.isFinite(duration) && duration > 0 ? duration : 0,
+      waveform,
     };
 
     const result = await messageService.sendMediaMessage({

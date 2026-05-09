@@ -60,6 +60,15 @@ const createMessageInChat = async ({
     messagePayload.fileName = String(media.fileName || '').trim();
     messagePayload.fileSize = Number(media.fileSize || 0);
     messagePayload.mimeType = String(media.mimeType || '').trim();
+    if (Number.isFinite(Number(media.duration)) && Number(media.duration) > 0) {
+      messagePayload.duration = Number(media.duration);
+    }
+    if (Array.isArray(media.waveform) && media.waveform.length) {
+      messagePayload.waveform = media.waveform
+        .map((value) => Number(value))
+        .filter((value) => Number.isFinite(value))
+        .slice(0, 64);
+    }
   }
 
   const message = await messageRepository.create(messagePayload);
@@ -106,7 +115,7 @@ export const messageService = {
     }
 
     const mediaType = String(media.type || '').trim();
-    if (!['image', 'video', 'audio', 'file'].includes(mediaType)) {
+    if (!['image', 'video', 'audio', 'voice', 'file'].includes(mediaType)) {
       throw BadRequest('Invalid media message type');
     }
 

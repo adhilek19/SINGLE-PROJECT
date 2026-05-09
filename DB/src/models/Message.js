@@ -28,7 +28,7 @@ const messageSchema = new mongoose.Schema(
     },
     type: {
       type: String,
-      enum: ['text', 'image', 'video', 'audio', 'file'],
+      enum: ['text', 'image', 'video', 'audio', 'voice', 'file'],
       default: 'text',
     },
     clientMessageId: {
@@ -67,6 +67,15 @@ const messageSchema = new mongoose.Schema(
       type: String,
       trim: true,
       default: '',
+    },
+    duration: {
+      type: Number,
+      min: 0,
+      default: 0,
+    },
+    waveform: {
+      type: [Number],
+      default: [],
     },
     seenBy: {
       type: [
@@ -137,6 +146,12 @@ messageSchema.pre('validate', function () {
     }
     if (!String(this.mimeType || '').trim()) {
       this.invalidate('mimeType', 'Media mimeType is required');
+    }
+  }
+
+  if (this.type === 'voice') {
+    if (!Number.isFinite(Number(this.duration)) || Number(this.duration) <= 0) {
+      this.invalidate('duration', 'Voice duration is required');
     }
   }
 

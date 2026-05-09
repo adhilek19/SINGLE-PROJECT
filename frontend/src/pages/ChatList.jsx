@@ -46,6 +46,7 @@ const buildLastMessage = (chat) => {
   if (message.isDeleted) return 'Message deleted';
   if (message.type === 'image') return 'Photo';
   if (message.type === 'video') return 'Video';
+  if (message.type === 'voice') return 'Voice note';
   if (message.type === 'audio') return 'Audio';
   if (message.type === 'file') return message.fileName || 'Document';
   return message.text || 'Text message';

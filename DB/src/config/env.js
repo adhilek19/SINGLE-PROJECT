@@ -37,6 +37,13 @@ const envSchema = joi
     CLOUDINARY_API_SECRET: joi.string().required(),
     CHAT_MEDIA_MAX_SIZE_MB: joi.number().integer().min(1).max(100).optional(),
     CHAT_MEDIA_CLOUDINARY_FOLDER: joi.string().trim().allow('').optional(),
+    CHAT_VOICE_MAX_SIZE_MB: joi.number().integer().min(1).max(100).optional(),
+    CHAT_VOICE_MAX_DURATION_SEC: joi.number().integer().min(1).max(1800).optional(),
+    WEBRTC_STUN_URL: joi.string().trim().allow('').optional(),
+    WEBRTC_TURN_URLS: joi.string().trim().allow('').optional(),
+    WEBRTC_TURN_USERNAME: joi.string().trim().allow('').optional(),
+    WEBRTC_TURN_CREDENTIAL: joi.string().trim().allow('').optional(),
+    WEBRTC_CALL_RING_TIMEOUT_MS: joi.number().integer().min(5000).max(120000).optional(),
   })
   .unknown();
 
@@ -74,4 +81,20 @@ if (env.CHAT_MEDIA_MAX_SIZE_MB === undefined) {
 
 if (!env.CHAT_MEDIA_CLOUDINARY_FOLDER) {
   env.CHAT_MEDIA_CLOUDINARY_FOLDER = 'sahayatri/chat';
+}
+
+if (env.CHAT_VOICE_MAX_SIZE_MB === undefined) {
+  env.CHAT_VOICE_MAX_SIZE_MB = Math.min(10, Number(env.CHAT_MEDIA_MAX_SIZE_MB || 25));
+}
+
+if (env.CHAT_VOICE_MAX_DURATION_SEC === undefined) {
+  env.CHAT_VOICE_MAX_DURATION_SEC = 180;
+}
+
+if (!env.WEBRTC_STUN_URL) {
+  env.WEBRTC_STUN_URL = 'stun:stun.l.google.com:19302';
+}
+
+if (env.WEBRTC_CALL_RING_TIMEOUT_MS === undefined) {
+  env.WEBRTC_CALL_RING_TIMEOUT_MS = 30000;
 }

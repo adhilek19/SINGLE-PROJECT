@@ -229,13 +229,19 @@ export const sendMessage = createAsyncThunk(
 
 export const sendMediaMessage = createAsyncThunk(
   'chat/sendMediaMessage',
-  async ({ chatId, file, onUploadProgress, clientMessageId = '' }, { rejectWithValue }) => {
+  async (
+    { chatId, file, onUploadProgress, clientMessageId = '', type, duration, waveform },
+    { rejectWithValue }
+  ) => {
     try {
       const response = await chatService.sendMediaMessage({
         chatId,
         file,
         onUploadProgress,
         clientMessageId,
+        type,
+        duration,
+        waveform,
       });
       return {
         chatId,
@@ -319,6 +325,25 @@ const chatSlice = createSlice({
       }
 
       state.chats = [...state.chats].sort((a, b) => chatTimeValue(b) - chatTimeValue(a));
+    },
+
+    removeLocalMessage(state, action) {
+      const { chatId, messageId, clientMessageId } = action.payload || {};
+      const safeChatId = toId(chatId);
+      if (!safeChatId) return;
+
+      const safeMessageId = toId(messageId);
+      const safeClientMessageId = String(clientMessageId || '').trim();
+
+      state.messagesByChat[safeChatId] = (state.messagesByChat[safeChatId] || []).filter(
+        (message) => {
+          if (safeMessageId && toId(message?._id) === safeMessageId) return false;
+          if (safeClientMessageId && getClientMessageId(message) === safeClientMessageId) {
+            return false;
+          }
+          return true;
+        }
+      );
     },
 
     setOptimisticMessageStatus(state, action) {
@@ -607,6 +632,20 @@ const chatSlice = createSlice({
         state.sendStatusByChat[chatId] = 'failed';
         state.sendErrorByChat[chatId] =
           action.payload?.message || 'Failed to send media';
+
+        const clientMessageId = String(
+          action.payload?.clientMessageId || action.meta.arg?.clientMessageId || ''
+        ).trim();
+        if (clientMessageId) {
+          state.messagesByChat[chatId] = patchOptimisticByClientId(
+            state.messagesByChat[chatId] || [],
+            clientMessageId,
+            {
+              localStatus: 'failed',
+              localError: state.sendErrorByChat[chatId],
+            }
+          );
+        }
       })
       .addCase(markMessageSeen.fulfilled, (state, action) => {
         const message = action.payload;
@@ -655,6 +694,7 @@ export const {
   setActiveChatId,
   clearTypingForChat,
   addOptimisticMessage,
+  removeLocalMessage,
   setOptimisticMessageStatus,
   socketMessageReceived,
   socketMessageSeen,
