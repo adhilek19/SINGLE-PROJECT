@@ -49,7 +49,10 @@ const OTP = () => {
     if (resendLoading) return;
     setResendLoading(true);
     try {
-      const response = await authService.resendOtp({ email });
+      const response =
+        type === 'forgot_password'
+          ? await authService.forgotPassword({ email })
+          : await authService.resendOtp({ email });
       const newDevOtp = response.data?.data?.devOtp;
 
       if (newDevOtp) {
@@ -57,7 +60,11 @@ const OTP = () => {
         toast.success(`Email delivery failed. Development OTP: ${newDevOtp}`);
       } else {
         setDevOtp('');
-        toast.success('OTP resent successfully!');
+        toast.success(
+          type === 'forgot_password'
+            ? 'Password reset OTP resent successfully!'
+            : 'OTP resent successfully!'
+        );
       }
     } catch (error) {
       toast.error(getErrorMessage(error, 'Failed to resend OTP'));

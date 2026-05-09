@@ -20,6 +20,8 @@ import reviewRoutes from './src/routes/reviewRoutes.js';
 import reportRoutes from './src/routes/reportRoutes.js';
 import meRoutes from './src/routes/meRoutes.js';
 import rideRequestRoutes from './src/routes/rideRequestRoutes.js';
+import chatRoutes from './src/routes/chatRoutes.js';
+import messageRoutes from './src/routes/messageRoutes.js';
 import { initSocket } from './src/socket/socketServer.js';
 
 import './src/config/passport.js'; // ✅ this is already correct
@@ -81,6 +83,8 @@ app.use('/api/reviews', reviewRoutes);
 app.use('/api/reports', reportRoutes);
 app.use('/api/me', meRoutes);
 app.use('/api/ride-requests', rideRequestRoutes);
+app.use('/api/chats', chatRoutes);
+app.use('/api/messages', messageRoutes);
 
 app.get('/health', (req, res) => {
   res.json({

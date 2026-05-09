@@ -71,7 +71,7 @@ export const initAuthThunk = createAsyncThunk(
   'auth/init',
   async (_, { rejectWithValue }) => {
     try {
-      const res = await authService.refreshToken();
+      const res = await authService.refreshToken({ silent: true });
       const token = res.data?.data?.accessToken;
 
       if (!token) throw new Error('No access token returned');

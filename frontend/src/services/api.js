@@ -70,6 +70,9 @@ api.interceptors.response.use(
     }
 
     const url = originalRequest.url || '';
+    const shouldSkipAuthFailureRedirect = Boolean(
+      originalRequest._skipAuthFailureRedirect
+    );
 
     // Do not try refresh-token for auth endpoints or public discovery endpoints.
     // Otherwise login/register/forgot failures create extra /refresh-token 401 spam.
@@ -101,7 +104,11 @@ api.interceptors.response.use(
     try {
       if (!refreshPromise) {
         refreshPromise = api
-          .post('/auth/refresh-token')
+          .post('/auth/refresh-token', null, {
+            withCredentials: true,
+            _skipAuthFailureRedirect: true,
+            _isRefreshProbe: true,
+          })
           .then((res) => res.data?.data?.accessToken)
           .finally(() => {
             refreshPromise = null;
@@ -122,7 +129,10 @@ api.interceptors.response.use(
       tokenStore.clear();
       localStorage.removeItem('authUser');
       if (onAuthFailure) onAuthFailure();
-      if (window.location.pathname !== '/login') {
+      if (
+        !shouldSkipAuthFailureRedirect &&
+        window.location.pathname !== '/login'
+      ) {
         window.location.assign('/login');
       }
       return Promise.reject(error);
@@ -150,7 +160,11 @@ export const authService = {
   forgotPassword: (data) => api.post('/auth/forgot-password', data),
   resetPassword: (data) => api.post('/auth/reset-password', data),
   logout: () => api.post('/auth/logout'),
-  refreshToken: () => api.post('/auth/refresh-token'),
+  refreshToken: ({ silent = false } = {}) =>
+    api.post('/auth/refresh-token', null, {
+      withCredentials: true,
+      _skipAuthFailureRedirect: Boolean(silent),
+    }),
   getProfile: () => api.get('/auth/me'),
   updateProfile: (data) => api.put('/auth/me', data),
   updateLocation: (data) => api.put('/auth/me/location', data),
@@ -233,6 +247,33 @@ export const rideService = {
       () => api.patch(`/rides/requests/${requestId}/no-show`, { reason }),
       () => api.patch(`/ride-requests/${requestId}/no-show`, { reason })
     ),
+};
+
+export const chatService = {
+  createOrGetRideChat: (rideId, userId) =>
+    api.post(`/chats/ride/${rideId}/user/${userId}`),
+
+  getMyChats: () => api.get('/chats'),
+
+  getChatMessages: (chatId, params = {}) =>
+    api.get(`/chats/${chatId}/messages`, { params }),
+
+  sendMessage: (payload) => api.post('/messages', payload),
+
+  sendMediaMessage: ({ chatId, file, onUploadProgress }) => {
+    const formData = new FormData();
+    formData.append('chatId', chatId);
+    formData.append('media', file);
+
+    return api.post('/messages/media', formData, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+      onUploadProgress,
+    });
+  },
+
+  markMessageSeen: (messageId) => api.patch(`/messages/${messageId}/seen`),
+
+  deleteMessage: (messageId) => api.delete(`/messages/${messageId}`),
 };
 
 export const reviewService = {

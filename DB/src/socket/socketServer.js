@@ -4,9 +4,17 @@ import { env } from '../config/env.js';
 import User from '../models/User.js';
 import Ride from '../models/Ride.js';
 import RideRequest from '../models/RideRequest.js';
+import { setSocketIO } from './socketEmitter.js';
+import {
+  chatRoomName,
+  ensureChatAccess,
+  toId,
+  userRoomName,
+} from '../services/chatAccessService.js';
+import { messageService } from '../services/messageService.js';
 
-const ROOM_PREFIX = 'ride:';
-const roomName = (rideId) => `${ROOM_PREFIX}${rideId}`;
+const RIDE_ROOM_PREFIX = 'ride:';
+const rideRoomName = (rideId) => `${RIDE_ROOM_PREFIX}${rideId}`;
 
 const normalizeOrigin = (origin = '') => String(origin).trim().replace(/\/+$/, '');
 
@@ -74,6 +82,33 @@ const resolveRideRole = async ({ rideId, user }) => {
   return null;
 };
 
+const onlineSocketCounts = new Map();
+
+const increaseOnlineCount = (userId) => {
+  const current = Number(onlineSocketCounts.get(userId) || 0);
+  onlineSocketCounts.set(userId, current + 1);
+  return current === 0;
+};
+
+const decreaseOnlineCount = (userId) => {
+  const current = Number(onlineSocketCounts.get(userId) || 0);
+  if (current <= 1) {
+    onlineSocketCounts.delete(userId);
+    return true;
+  }
+  onlineSocketCounts.set(userId, current - 1);
+  return false;
+};
+
+const emitDelivered = ({ io, chatId, messageId, userId }) => {
+  io.to(chatRoomName(chatId)).emit('message_delivered', {
+    chatId: toId(chatId),
+    messageId: toId(messageId),
+    userId: toId(userId),
+    deliveredAt: new Date().toISOString(),
+  });
+};
+
 export const initSocket = ({ httpServer }) => {
   const io = new Server(httpServer, {
     cors: {
@@ -84,6 +119,8 @@ export const initSocket = ({ httpServer }) => {
       credentials: true,
     },
   });
+
+  setSocketIO(io);
 
   io.use(async (socket, next) => {
     try {
@@ -110,6 +147,211 @@ export const initSocket = ({ httpServer }) => {
   });
 
   io.on('connection', (socket) => {
+    const currentUserId = toId(socket.user?._id);
+    const personalRoom = userRoomName(currentUserId);
+    socket.join(personalRoom);
+
+    const becameOnline = increaseOnlineCount(currentUserId);
+    if (becameOnline) {
+      io.emit('user_online', {
+        userId: currentUserId,
+        at: new Date().toISOString(),
+      });
+    }
+
+    socket.on('join_chat', async (payload = {}, ack) => {
+      try {
+        const chatId = String(payload.chatId || '').trim();
+        if (!chatId) throw new Error('chatId is required');
+
+        const access = await ensureChatAccess({ chatId, userId: socket.user._id });
+        await socket.join(chatRoomName(access.chatId));
+
+        const deliveredIds = await messageService.markAllDeliveredForUserInChat({
+          chatId: access.chatId,
+          userId: socket.user._id,
+        });
+
+        deliveredIds.forEach((messageId) => {
+          emitDelivered({
+            io,
+            chatId: access.chatId,
+            messageId,
+            userId: socket.user._id,
+          });
+        });
+
+        if (typeof ack === 'function') {
+          ack({
+            ok: true,
+            chatId: access.chatId,
+          });
+        }
+      } catch (err) {
+        if (typeof ack === 'function') {
+          ack({ ok: false, message: err.message || 'join_chat failed' });
+        }
+      }
+    });
+
+    socket.on('leave_chat', async (payload = {}, ack) => {
+      try {
+        const chatId = String(payload.chatId || '').trim();
+        if (chatId) {
+          await socket.leave(chatRoomName(chatId));
+        }
+        if (typeof ack === 'function') ack({ ok: true });
+      } catch (err) {
+        if (typeof ack === 'function') {
+          ack({ ok: false, message: err.message || 'leave_chat failed' });
+        }
+      }
+    });
+
+    socket.on('send_message', async (payload = {}, ack) => {
+      try {
+        const result = await messageService.sendTextMessage({
+          chatId: payload.chatId,
+          senderId: socket.user._id,
+          text: payload.text,
+        });
+
+        let messagePayload = result.message;
+        const receiverSockets = await io
+          .in(userRoomName(result.receiverId))
+          .fetchSockets();
+
+        if (receiverSockets.length) {
+          const delivered = await messageService.markMessageDelivered({
+            messageId: result.message._id,
+            userId: result.receiverId,
+          });
+          messagePayload = delivered.message || messagePayload;
+          if (delivered.changed) {
+            emitDelivered({
+              io,
+              chatId: result.chatId,
+              messageId: result.message._id,
+              userId: result.receiverId,
+            });
+          }
+        }
+
+        io.to(chatRoomName(result.chatId)).emit('receive_message', {
+          chatId: toId(result.chatId),
+          message: messagePayload,
+        });
+
+        if (typeof ack === 'function') {
+          ack({
+            ok: true,
+            message: messagePayload,
+          });
+        }
+      } catch (err) {
+        if (typeof ack === 'function') {
+          ack({ ok: false, message: err.message || 'send_message failed' });
+        }
+      }
+    });
+
+    socket.on('typing', async (payload = {}, ack) => {
+      try {
+        const chatId = String(payload.chatId || '').trim();
+        if (!chatId) throw new Error('chatId is required');
+
+        const access = await ensureChatAccess({ chatId, userId: socket.user._id });
+
+        socket.to(chatRoomName(access.chatId)).emit('typing', {
+          chatId: access.chatId,
+          userId: currentUserId,
+          name: socket.user?.name || 'User',
+        });
+
+        if (typeof ack === 'function') ack({ ok: true });
+      } catch (err) {
+        if (typeof ack === 'function') {
+          ack({ ok: false, message: err.message || 'typing failed' });
+        }
+      }
+    });
+
+    socket.on('stop_typing', async (payload = {}, ack) => {
+      try {
+        const chatId = String(payload.chatId || '').trim();
+        if (!chatId) throw new Error('chatId is required');
+
+        const access = await ensureChatAccess({ chatId, userId: socket.user._id });
+
+        socket.to(chatRoomName(access.chatId)).emit('stop_typing', {
+          chatId: access.chatId,
+          userId: currentUserId,
+        });
+
+        if (typeof ack === 'function') ack({ ok: true });
+      } catch (err) {
+        if (typeof ack === 'function') {
+          ack({ ok: false, message: err.message || 'stop_typing failed' });
+        }
+      }
+    });
+
+    socket.on('message_seen', async (payload = {}, ack) => {
+      try {
+        const messageId = String(payload.messageId || '').trim();
+        if (!messageId) throw new Error('messageId is required');
+
+        const message = await messageService.markMessageSeen({
+          messageId,
+          userId: socket.user._id,
+        });
+
+        io.to(chatRoomName(message.chat)).emit('message_seen', {
+          chatId: toId(message.chat),
+          messageId: toId(message._id),
+          userId: currentUserId,
+          seenAt: new Date().toISOString(),
+        });
+
+        if (typeof ack === 'function') {
+          ack({ ok: true, message });
+        }
+      } catch (err) {
+        if (typeof ack === 'function') {
+          ack({ ok: false, message: err.message || 'message_seen failed' });
+        }
+      }
+    });
+
+    socket.on('message_delivered', async (payload = {}, ack) => {
+      try {
+        const messageId = String(payload.messageId || '').trim();
+        if (!messageId) throw new Error('messageId is required');
+
+        const delivery = await messageService.markMessageDelivered({
+          messageId,
+          userId: socket.user._id,
+        });
+
+        if (delivery.changed && delivery.message?.chat) {
+          emitDelivered({
+            io,
+            chatId: delivery.message.chat,
+            messageId: delivery.message._id,
+            userId: currentUserId,
+          });
+        }
+
+        if (typeof ack === 'function') {
+          ack({ ok: true, message: delivery.message });
+        }
+      } catch (err) {
+        if (typeof ack === 'function') {
+          ack({ ok: false, message: err.message || 'message_delivered failed' });
+        }
+      }
+    });
+
     socket.on('joinRide', async (payload = {}, ack) => {
       try {
         const rideId = String(payload.rideId || '').trim();
@@ -118,7 +360,7 @@ export const initSocket = ({ httpServer }) => {
         const role = await resolveRideRole({ rideId, user: socket.user });
         if (!role) throw new Error('Not allowed to join this ride');
 
-        await socket.join(roomName(rideId));
+        await socket.join(rideRoomName(rideId));
         if (typeof ack === 'function') ack({ ok: true, rideId, role });
       } catch (err) {
         if (typeof ack === 'function') ack({ ok: false, message: err.message || 'joinRide failed' });
@@ -128,7 +370,7 @@ export const initSocket = ({ httpServer }) => {
     socket.on('leaveRide', async (payload = {}, ack) => {
       const rideId = String(payload.rideId || '').trim();
       if (rideId) {
-        await socket.leave(roomName(rideId));
+        await socket.leave(rideRoomName(rideId));
       }
       if (typeof ack === 'function') ack({ ok: true });
     });
@@ -192,7 +434,9 @@ export const initSocket = ({ httpServer }) => {
             rideDoc.lastLiveLocations = rideDoc.lastLiveLocations.slice(-10);
           }
           if (rideDoc.status === 'started' && !Number.isFinite(speed)) {
-            rideDoc.anomalyFlags = Array.from(new Set([...(rideDoc.anomalyFlags || []), 'location_missing']));
+            rideDoc.anomalyFlags = Array.from(
+              new Set([...(rideDoc.anomalyFlags || []), 'location_missing'])
+            );
           }
           await rideDoc.save();
         }
@@ -212,10 +456,20 @@ export const initSocket = ({ httpServer }) => {
           updatedAt,
         };
 
-        io.to(roomName(rideId)).emit('location:broadcast', broadcast);
+        io.to(rideRoomName(rideId)).emit('location:broadcast', broadcast);
         if (typeof ack === 'function') ack({ ok: true });
       } catch (err) {
         if (typeof ack === 'function') ack({ ok: false, message: err.message || 'location:update failed' });
+      }
+    });
+
+    socket.on('disconnect', () => {
+      const becameOffline = decreaseOnlineCount(currentUserId);
+      if (becameOffline) {
+        io.emit('user_offline', {
+          userId: currentUserId,
+          at: new Date().toISOString(),
+        });
       }
     });
   });

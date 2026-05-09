@@ -35,6 +35,8 @@ const envSchema = joi
     CLOUDINARY_CLOUD_NAME: joi.string().required(),
     CLOUDINARY_API_KEY: joi.string().required(),
     CLOUDINARY_API_SECRET: joi.string().required(),
+    CHAT_MEDIA_MAX_SIZE_MB: joi.number().integer().min(1).max(100).optional(),
+    CHAT_MEDIA_CLOUDINARY_FOLDER: joi.string().trim().allow('').optional(),
   })
   .unknown();
 
@@ -64,4 +66,12 @@ export const env = value;
 
 if (!env.GOOGLE_CALLBACK_URL) {
   env.GOOGLE_CALLBACK_URL = `${env.BACKEND_URL.replace(/\/$/, '')}/api/auth/google/callback`;
+}
+
+if (env.CHAT_MEDIA_MAX_SIZE_MB === undefined) {
+  env.CHAT_MEDIA_MAX_SIZE_MB = 25;
+}
+
+if (!env.CHAT_MEDIA_CLOUDINARY_FOLDER) {
+  env.CHAT_MEDIA_CLOUDINARY_FOLDER = 'sahayatri/chat';
 }

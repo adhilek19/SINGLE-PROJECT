@@ -17,6 +17,7 @@ import toast from 'react-hot-toast';
 import RouteMap from '../components/RouteMap';
 import { useDispatch, useSelector } from 'react-redux';
 import { fetchRideByIdThunk, cancelRideThunk } from '../redux/slices/rideSlice';
+import { createOrGetChat } from '../redux/slices/chatSlice';
 import { authService, getErrorMessage, rideService } from '../services/api';
 import { connectSocket, getSocket } from '../services/socket';
 import { useLiveLocation } from '../hooks/useLiveLocation';
@@ -584,6 +585,33 @@ const RideDetails = () => {
     window.location.href = 'tel:112';
   };
 
+  const handleOpenChat = async (targetUserId) => {
+    const safeTargetId = toId(targetUserId);
+    if (!safeTargetId) {
+      toast.error('Unable to open chat for this user');
+      return;
+    }
+
+    try {
+      const chat = await dispatch(
+        createOrGetChat({ rideId: id, userId: safeTargetId })
+      ).unwrap();
+
+      const safeChatId = toId(chat?._id);
+      if (!safeChatId) {
+        throw new Error('Chat not available');
+      }
+
+      navigate(`/chats/${safeChatId}`);
+    } catch (error) {
+      const message =
+        typeof error === 'string'
+          ? error
+          : getErrorMessage(error, 'Failed to open chat');
+      toast.error(message);
+    }
+  };
+
   const handleReportAndBlock = async () => {
     if (!reportForm.reason.trim() || !reportForm.description.trim()) {
       return toast.error('Reason and description are required');
@@ -832,6 +860,7 @@ const RideDetails = () => {
                 <div className="flex flex-wrap gap-2">
                   {['pending', 'accepted'].includes(myLatestRequest.status) && <button onClick={() => handleConfirmPickup(myLatestRequest._id)} className="rounded-xl bg-blue-600 px-4 py-2 font-bold text-white">Confirm pickup with GPS</button>}
                   {['pending', 'accepted'].includes(myLatestRequest.status) && <button onClick={() => handleCancelRequest(myLatestRequest._id)} disabled={!isScheduled || requestActionLoading[`cancel-${myLatestRequest._id}`]} className="rounded-xl bg-slate-900 px-4 py-2 font-bold text-white disabled:opacity-60">{requestActionLoading[`cancel-${myLatestRequest._id}`] ? 'Cancelling...' : 'Cancel Request'}</button>}
+                  {hasAcceptedRequest && driverId ? <button onClick={() => handleOpenChat(driverId)} className="rounded-xl bg-emerald-600 px-4 py-2 font-bold text-white">Message Driver</button> : null}
                   {['pending', 'accepted'].includes(myLatestRequest.status) && <button onClick={() => handleMarkNoShow(myLatestRequest._id)} className="rounded-xl bg-amber-600 px-4 py-2 font-bold text-white">Driver no-show</button>}
                 </div>
               </div>
@@ -845,6 +874,7 @@ const RideDetails = () => {
                 <button onClick={handleCreateRequest} disabled={!canRequestRide || requestActionLoading.create || isPastScheduled} className="rounded-xl bg-slate-900 px-4 py-3 font-bold text-white disabled:opacity-60">
                   {isDriver ? 'Your ride' : !isRideBookable ? (seatsLeft <= 0 ? 'Full' : 'Unavailable') : requestActionLoading.create ? 'Requesting...' : 'Request Ride'}
                 </button>
+                {hasAcceptedRequest && driverId ? <button onClick={() => handleOpenChat(driverId)} className="rounded-xl bg-emerald-600 px-4 py-2 font-bold text-white">Message Driver</button> : null}
                 {hasPendingRequest ? <p className="text-xs font-bold text-blue-700">Requested</p> : null}
                 {hasAcceptedRequest ? <p className="text-xs font-bold text-emerald-700">Booked</p> : null}
               </div>
@@ -883,7 +913,10 @@ const RideDetails = () => {
                       <ProfileLink user={req.passenger} fallback="Passenger" />
                       {' '}· seats {req.seatsRequested} · PIN verified: {req.pinVerified ? 'Yes ✅' : 'No'}
                     </span>
-                    <button onClick={() => handleMarkNoShow(req._id)} className="rounded-lg bg-amber-600 px-3 py-1 font-bold text-white">Mark no-show</button>
+                    <div className="flex flex-wrap gap-2">
+                      <button onClick={() => handleOpenChat(toId(req.passenger))} className="rounded-lg bg-emerald-600 px-3 py-1 font-bold text-white">Message Passenger</button>
+                      <button onClick={() => handleMarkNoShow(req._id)} className="rounded-lg bg-amber-600 px-3 py-1 font-bold text-white">Mark no-show</button>
+                    </div>
                   </div>
                 ))}
               </div>
@@ -970,3 +1003,4 @@ const RideDetails = () => {
 };
 
 export default RideDetails;
+

@@ -1,25 +1,13 @@
 import { authService } from '../services/authService.js';
 import { successResponse } from '../utils/apiResponse.js';
 import { AppError, NotFound } from '../utils/AppError.js';
-import { env } from '../config/env.js';
 import { userRepository } from '../repositories/userRepository.js';
 import { Review } from '../models/Review.js';
 import Ride from '../models/Ride.js';
-
-const cookieOptions = () => ({
-  httpOnly: true,
-  secure: env.NODE_ENV === 'production',
-  sameSite: env.NODE_ENV === 'production' ? 'none' : 'lax',
-  maxAge: 7 * 24 * 60 * 60 * 1000,
-  path: '/',
-});
-
-const clearCookieOptions = () => ({
-  httpOnly: true,
-  secure: env.NODE_ENV === 'production',
-  sameSite: env.NODE_ENV === 'production' ? 'none' : 'lax',
-  path: '/',
-});
+import {
+  refreshTokenCookieBaseOptions,
+  refreshTokenCookieOptions,
+} from '../utils/authCookie.js';
 
 const toClientLocation = (location) => {
   if (!location) return null;
@@ -142,7 +130,7 @@ export const login = async (req, res, next) => {
   try {
     const { accessToken, refreshToken, user } = await authService.login(req.body);
 
-    res.cookie('refreshToken', refreshToken, cookieOptions());
+    res.cookie('refreshToken', refreshToken, refreshTokenCookieOptions);
 
     return successResponse(res, 200, 'Login successful', {
       accessToken,
@@ -177,7 +165,12 @@ export const logout = async (req, res, next) => {
       req.cookies?.refreshToken
     );
 
-    res.clearCookie('refreshToken', clearCookieOptions());
+    res.clearCookie('refreshToken', refreshTokenCookieBaseOptions);
+    // Backward compatibility for older cookies that were set on root path.
+    res.clearCookie('refreshToken', {
+      ...refreshTokenCookieBaseOptions,
+      path: '/',
+    });
 
     return successResponse(res, 200, result.message);
   } catch (err) {

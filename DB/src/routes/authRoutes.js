@@ -23,18 +23,11 @@ import {
 
 import { env } from '../config/env.js';
 import { generateAccessToken, generateRefreshToken } from '../utils/token.js';
+import { refreshTokenCookieOptions } from '../utils/authCookie.js';
 
 const router = Router();
 
 const clientUrl = env.CLIENT_URL.replace(/\/$/, '');
-
-const refreshCookieOptions = {
-  httpOnly: true,
-  secure: env.NODE_ENV === 'production',
-  sameSite: env.NODE_ENV === 'production' ? 'none' : 'lax',
-  maxAge: 7 * 24 * 60 * 60 * 1000,
-  path: '/',
-};
 
 router.post(
   '/register',
@@ -158,7 +151,7 @@ router.get('/google/callback', (req, res, next) => {
         const refreshToken =
           payload.refreshToken || generateRefreshToken(user._id);
 
-        res.cookie('refreshToken', refreshToken, refreshCookieOptions);
+        res.cookie('refreshToken', refreshToken, refreshTokenCookieOptions);
 
         const redirectUrl = new URL(clientUrl);
         redirectUrl.searchParams.set('token', accessToken);

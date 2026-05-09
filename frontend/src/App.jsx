@@ -32,6 +32,8 @@ const ResetPassword = lazy(() => import('./pages/ResetPassword'));
 const EditRide = lazy(() => import('./pages/EditRide'));
 const PublicProfile = lazy(() => import('./pages/PublicProfile'));
 const TrackRide = lazy(() => import('./pages/TrackRide'));
+const ChatList = lazy(() => import('./pages/ChatList'));
+const ChatRoom = lazy(() => import('./pages/ChatRoom'));
 
 const LoadingScreen = () => (
   <div className="flex-grow flex items-center justify-center">
@@ -185,6 +187,28 @@ function App() {
               element={
                 <ProtectedRoute>
                   <MyRides />
+                </ProtectedRoute>
+              }
+            />
+
+            <Route
+              path="/chats"
+              element={
+                <ProtectedRoute>
+                  <LazyPage>
+                    <ChatList />
+                  </LazyPage>
+                </ProtectedRoute>
+              }
+            />
+
+            <Route
+              path="/chats/:chatId"
+              element={
+                <ProtectedRoute>
+                  <LazyPage>
+                    <ChatRoom />
+                  </LazyPage>
                 </ProtectedRoute>
               }
             />
