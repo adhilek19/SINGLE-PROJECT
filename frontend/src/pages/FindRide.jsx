@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   Calendar,
   Car,
@@ -17,6 +17,12 @@ import LocationSearch from '../components/LocationSearch';
 import RouteMap from '../components/RouteMap';
 import { getErrorMessage, rideService } from '../services/api';
 import { resolveGeoapifyBestLocation } from '../services/locationAutocomplete';
+import {
+  connectChatSocket,
+  onRideCancelled,
+  onRideCreated,
+  onRideUpdated,
+} from '../services/chatSocket';
 
 const SEARCH_HISTORY_KEY = 'rideSearchHistory';
 const SEARCH_STATE_KEY = 'sahayatri_find_ride_search_v3';
@@ -162,6 +168,13 @@ const mapMinMaxToPricePreset = (minPrice, maxPrice) => RANGE_TO_PRICE_PRESET[`${
 
 const getRideSeatsLeft = (ride) =>
   ride.seatsLeft ?? Math.max(0, Number(ride.seatsAvailable || 0) - Number(ride.bookedSeats || 0));
+
+const upsertRideById = (rides = [], ride) => {
+  if (!ride?._id) return rides;
+  const next = rides.filter((entry) => String(entry?._id) !== String(ride._id));
+  next.unshift(ride);
+  return next;
+};
 
 const rideMatchesTimeWindow = (ride, timeWindow) => {
   if (!timeWindow || timeWindow === 'any') return true;
@@ -316,6 +329,7 @@ const FindRide = () => {
   const [fromCorrectionHint, setFromCorrectionHint] = useState('');
   const [toCorrectionHint, setToCorrectionHint] = useState('');
   const [searchStateReady, setSearchStateReady] = useState(false);
+  const realtimeQueryRef = useRef({});
 
   const fromText = getSearchText(from);
   const toText = getSearchText(to);
@@ -346,6 +360,91 @@ const FindRide = () => {
       Object.values(preferenceFilters).some((value) => value !== '' && value !== false)
     );
   }, [fromText, toText, dateTime, vehicleType, minPrice, maxPrice, seats, preferenceFilters]);
+
+  useEffect(() => {
+    realtimeQueryRef.current = {
+      fromText,
+      toText,
+      vehicleType,
+      minPrice,
+      maxPrice,
+      seats,
+    };
+  }, [fromText, toText, vehicleType, minPrice, maxPrice, seats]);
+
+  useEffect(() => {
+    if (!currentUserId) return undefined;
+
+    const matchesRealtimeFilter = (ride) => {
+      if (!ride?._id) return false;
+      if (ride.status && ride.status !== 'scheduled') return false;
+
+      const sourceName = String(ride.source?.name || '').toLowerCase();
+      const destinationName = String(ride.destination?.name || '').toLowerCase();
+      const query = realtimeQueryRef.current || {};
+
+      const fromQuery = String(query.fromText || '').trim().toLowerCase();
+      if (fromQuery && !sourceName.includes(fromQuery)) return false;
+
+      const toQuery = String(query.toText || '').trim().toLowerCase();
+      if (toQuery && !destinationName.includes(toQuery)) return false;
+
+      const vehicleQuery = String(query.vehicleType || '').trim().toLowerCase();
+      if (vehicleQuery) {
+        const vehicleTypeLabel = String(ride.vehicle?.type || '').toLowerCase();
+        if (!vehicleTypeLabel.includes(vehicleQuery)) return false;
+      }
+
+      const minPriceValue = Number(query.minPrice || '');
+      if (Number.isFinite(minPriceValue) && Number(ride.price || 0) < minPriceValue) {
+        return false;
+      }
+
+      const maxPriceValue = Number(query.maxPrice || '');
+      if (Number.isFinite(maxPriceValue) && Number(ride.price || 0) > maxPriceValue) {
+        return false;
+      }
+
+      const minSeats = Number(query.seats || '');
+      if (Number.isFinite(minSeats) && getRideSeatsLeft(ride) < minSeats) {
+        return false;
+      }
+
+      return true;
+    };
+
+    connectChatSocket();
+
+    const unsubscribers = [
+      onRideCreated((payload) => {
+        const ride = payload?.ride;
+        if (!ride || !matchesRealtimeFilter(ride)) return;
+        setRides((prev) => upsertRideById(prev, ride));
+      }),
+      onRideUpdated((payload) => {
+        const ride = payload?.ride;
+        if (!ride?._id) return;
+        setRides((prev) => {
+          const exists = prev.some((entry) => String(entry?._id) === String(ride._id));
+          if (!matchesRealtimeFilter(ride)) {
+            return exists
+              ? prev.filter((entry) => String(entry?._id) !== String(ride._id))
+              : prev;
+          }
+          return upsertRideById(prev, ride);
+        });
+      }),
+      onRideCancelled((payload) => {
+        const rideId = String(payload?.rideId || payload?.ride?._id || '');
+        if (!rideId) return;
+        setRides((prev) => prev.filter((entry) => String(entry?._id) !== rideId));
+      }),
+    ];
+
+    return () => {
+      unsubscribers.forEach((unsubscribe) => unsubscribe?.());
+    };
+  }, [currentUserId]);
 
   const saveSearchState = () => {
     if (!searchStateReady) return;

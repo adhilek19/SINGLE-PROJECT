@@ -2,6 +2,11 @@ import { rideService } from '../services/rideService.js';
 import { rideMatchingService } from '../services/rideMatchingService.js';
 import { successResponse } from '../utils/apiResponse.js';
 import { BadRequest } from '../utils/AppError.js';
+import {
+  emitRideCancelled,
+  emitRideCreated,
+  emitRideUpdated,
+} from '../socket/rideEvents.js';
 
 const validateIsoDate = (value, fieldName) => {
   if (!value) return;
@@ -27,6 +32,7 @@ export const createRide = async (req, res, next) => {
     }
 
     const ride = await rideService.createRide(req.userId, data);
+    emitRideCreated(ride);
 
     return successResponse(res, 201, 'Ride created successfully', ride);
   } catch (err) {
@@ -54,6 +60,7 @@ export const updateRide = async (req, res, next) => {
       req.userId,
       updates
     );
+    emitRideUpdated(ride);
 
     return successResponse(res, 200, 'Ride updated successfully', ride);
   } catch (err) {
@@ -66,6 +73,7 @@ export const updateRide = async (req, res, next) => {
 export const startRide = async (req, res, next) => {
   try {
     const ride = await rideService.startRide(req.params.id, req.userId, req.body.startPin || req.body.pin || req.body.tripPin);
+    emitRideUpdated(ride);
     return successResponse(res, 200, 'Ride started successfully', ride);
   } catch (err) {
     next(err);
@@ -75,6 +83,7 @@ export const startRide = async (req, res, next) => {
 export const endRide = async (req, res, next) => {
   try {
     const ride = await rideService.endRide(req.params.id, req.userId);
+    emitRideUpdated(ride);
     return successResponse(res, 200, 'Ride ended successfully', ride);
   } catch (err) {
     next(err);
@@ -84,6 +93,7 @@ export const endRide = async (req, res, next) => {
 export const completeRide = async (req, res, next) => {
   try {
     const ride = await rideService.completeRide(req.params.id, req.userId);
+    emitRideUpdated(ride);
     return successResponse(res, 200, 'Ride completed successfully', ride);
   } catch (err) {
     next(err);
@@ -97,6 +107,7 @@ export const updateRideStatus = async (req, res, next) => {
       req.userId,
       req.body.status
     );
+    emitRideUpdated(ride);
 
     return successResponse(res, 200, 'Ride status updated successfully', ride);
   } catch (err) {
@@ -111,6 +122,7 @@ export const cancelRide = async (req, res, next) => {
       req.userId,
       req.body.reason
     );
+    emitRideCancelled(ride);
 
     return successResponse(res, 200, 'Ride cancelled successfully', ride);
   } catch (err) {
@@ -367,6 +379,7 @@ export const joinRide = async (req, res, next) => {
   try {
     const seats = req.body.seats ? parseInt(req.body.seats) : 1;
     const ride = await rideService.joinRide(req.params.id, req.userId, seats);
+    emitRideUpdated(ride);
 
     return successResponse(res, 200, 'Successfully joined the ride', ride);
   } catch (err) {
@@ -379,6 +392,7 @@ export const joinRide = async (req, res, next) => {
 export const leaveRide = async (req, res, next) => {
   try {
     const ride = await rideService.leaveRide(req.params.id, req.userId);
+    emitRideUpdated(ride);
     return successResponse(res, 200, 'Successfully left the ride', ride);
   } catch (err) {
     next(err);

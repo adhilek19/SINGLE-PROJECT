@@ -1,5 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
-import { Paperclip, X } from 'lucide-react';
+import { Paperclip, Smile, X } from 'lucide-react';
+
+const QUICK_EMOJIS = ['😀', '😂', '😍', '👍', '🙏', '🔥', '🎉', '❤️', '😅', '😎'];
 
 const toPrettySize = (size = 0) => {
   const bytes = Number(size || 0);
@@ -34,9 +36,11 @@ const MessageInput = ({
   const [value, setValue] = useState('');
   const [selectedFile, setSelectedFile] = useState(null);
   const [previewUrl, setPreviewUrl] = useState('');
+  const [emojiOpen, setEmojiOpen] = useState(false);
   const typingTimerRef = useRef(null);
   const typingActiveRef = useRef(false);
   const fileInputRef = useRef(null);
+  const emojiPanelRef = useRef(null);
 
   const clearTypingTimer = () => {
     if (typingTimerRef.current) {
@@ -108,6 +112,20 @@ const MessageInput = ({
     }
   };
 
+  const handleEmojiPick = (emoji) => {
+    setValue((prev) => `${prev}${emoji}`);
+    if (!typingActiveRef.current) {
+      typingActiveRef.current = true;
+      onTypingStart?.();
+    }
+    clearTypingTimer();
+    typingTimerRef.current = window.setTimeout(() => {
+      typingActiveRef.current = false;
+      onTypingStop?.();
+    }, 1200);
+    setEmojiOpen(false);
+  };
+
   useEffect(() => {
     if (!selectedFile) {
       setPreviewUrl('');
@@ -126,6 +144,19 @@ const MessageInput = ({
   }, [selectedFile]);
 
   useEffect(() => () => clearTypingTimer(), []);
+
+  useEffect(() => {
+    if (!emojiOpen) return undefined;
+
+    const onDocClick = (event) => {
+      if (!emojiPanelRef.current?.contains(event.target)) {
+        setEmojiOpen(false);
+      }
+    };
+
+    window.addEventListener('pointerdown', onDocClick);
+    return () => window.removeEventListener('pointerdown', onDocClick);
+  }, [emojiOpen]);
 
   const selectedKind = getFileKind(selectedFile);
 
@@ -202,6 +233,31 @@ const MessageInput = ({
         >
           <Paperclip className="h-5 w-5" />
         </button>
+        <div className="relative" ref={emojiPanelRef}>
+          <button
+            type="button"
+            onClick={() => setEmojiOpen((prev) => !prev)}
+            disabled={disabled || mediaUploading}
+            className="h-11 rounded-2xl border border-slate-300 px-3 text-slate-700 disabled:opacity-50"
+            title="Emoji"
+          >
+            <Smile className="h-5 w-5" />
+          </button>
+          {emojiOpen ? (
+            <div className="absolute bottom-12 left-0 z-20 grid grid-cols-5 gap-1 rounded-xl border border-slate-200 bg-white p-2 shadow-lg">
+              {QUICK_EMOJIS.map((emoji) => (
+                <button
+                  key={emoji}
+                  type="button"
+                  onClick={() => handleEmojiPick(emoji)}
+                  className="h-8 w-8 rounded-lg text-lg hover:bg-slate-100"
+                >
+                  {emoji}
+                </button>
+              ))}
+            </div>
+          ) : null}
+        </div>
         <textarea
           value={value}
           onChange={handleChange}

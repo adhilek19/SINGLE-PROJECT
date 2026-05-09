@@ -27,6 +27,25 @@ const initialState = {
   },
 };
 
+const toId = (value) =>
+  (value && typeof value === 'object' ? value._id : value)?.toString?.() || '';
+
+const sortByDeparture = (rides = []) =>
+  [...rides].sort(
+    (a, b) =>
+      new Date(b?.departureTime || b?.createdAt || 0).getTime() -
+      new Date(a?.departureTime || a?.createdAt || 0).getTime()
+  );
+
+const upsertRide = (rides = [], incomingRide) => {
+  if (!incomingRide) return rides;
+  const incomingId = toId(incomingRide);
+  if (!incomingId) return rides;
+  const next = rides.filter((ride) => toId(ride) !== incomingId);
+  next.unshift(incomingRide);
+  return sortByDeparture(next);
+};
+
 // ─── Thunks ─────────────────────────────────────────────────────
 
 export const fetchRidesThunk = createAsyncThunk(
@@ -217,6 +236,33 @@ const rideSlice = createSlice({
         state.actionError[key]  = null;
       }
     },
+    socketRideCreated(state, action) {
+      const ride = action.payload?.ride || action.payload || null;
+      if (!ride || typeof ride !== 'object') return;
+      state.list = upsertRide(state.list, ride);
+    },
+    socketRideUpdated(state, action) {
+      const ride = action.payload?.ride || action.payload || null;
+      if (!ride || typeof ride !== 'object') return;
+      state.list = upsertRide(state.list, ride);
+      if (toId(state.selected) === toId(ride)) {
+        state.selected = {
+          ...(state.selected || {}),
+          ...ride,
+        };
+      }
+    },
+    socketRideCancelled(state, action) {
+      const ride = action.payload?.ride || action.payload || null;
+      if (!ride || typeof ride !== 'object') return;
+      state.list = upsertRide(state.list, ride);
+      if (toId(state.selected) === toId(ride)) {
+        state.selected = {
+          ...(state.selected || {}),
+          ...ride,
+        };
+      }
+    },
   },
   extraReducers: (builder) => {
     builder
@@ -330,5 +376,11 @@ const rideSlice = createSlice({
   },
 });
 
-export const { clearSelected, clearActionStatus } = rideSlice.actions;
+export const {
+  clearSelected,
+  clearActionStatus,
+  socketRideCreated,
+  socketRideUpdated,
+  socketRideCancelled,
+} = rideSlice.actions;
 export default rideSlice.reducer;

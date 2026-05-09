@@ -11,7 +11,7 @@ const populateChat = (query) =>
     .populate({
       path: 'lastMessage',
       select:
-        'chat ride sender receiver type text url publicId fileName fileSize mimeType seenBy deliveredTo isDeleted createdAt updatedAt',
+        'chat ride sender receiver type clientMessageId text url publicId fileName fileSize mimeType seenBy deliveredTo reactions isDeleted createdAt updatedAt',
       populate: [
         { path: 'sender', select: CHAT_PARTICIPANT_FIELDS },
         { path: 'receiver', select: CHAT_PARTICIPANT_FIELDS },
@@ -77,6 +77,10 @@ export const chatRepository = {
 
   create(data) {
     return Chat.create(data);
+  },
+
+  save(chat) {
+    return chat.save();
   },
 
   setLastMessageAndIncrementUnread({

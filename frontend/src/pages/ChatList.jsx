@@ -1,29 +1,8 @@
-import { useEffect, useMemo, useRef } from 'react';
+import { useEffect, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import toast from 'react-hot-toast';
 import { useDispatch, useSelector } from 'react-redux';
-import {
-  getMyChats,
-  socketMessageDelivered,
-  socketMessageReceived,
-  socketMessageSeen,
-  socketStopTyping,
-  socketTyping,
-  socketUserOffline,
-  socketUserOnline,
-} from '../redux/slices/chatSlice';
-import {
-  connectChatSocket,
-  joinChat,
-  leaveChat,
-  onMessageDelivered,
-  onMessageSeen,
-  onReceiveMessage,
-  onStopTyping,
-  onTyping,
-  onUserOffline,
-  onUserOnline,
-} from '../services/chatSocket';
+import { getMyChats } from '../redux/slices/chatSlice';
 
 const toId = (value) =>
   (value && typeof value === 'object' ? value._id : value)?.toString?.() || '';
@@ -34,6 +13,20 @@ const formatTime = (value) => {
     hour: '2-digit',
     minute: '2-digit',
   });
+};
+
+const formatLastSeen = (value) => {
+  if (!value) return '';
+  const time = new Date(value).getTime();
+  if (!Number.isFinite(time)) return '';
+  const delta = Math.max(0, Date.now() - time);
+  const mins = Math.floor(delta / (60 * 1000));
+  if (mins < 1) return 'last seen just now';
+  if (mins < 60) return `last seen ${mins}m ago`;
+  const hours = Math.floor(mins / 60);
+  if (hours < 24) return `last seen ${hours}h ago`;
+  const days = Math.floor(hours / 24);
+  return `last seen ${days}d ago`;
 };
 
 const getOtherParticipant = (chat, currentUserId) =>
@@ -61,60 +54,21 @@ const buildLastMessage = (chat) => {
 const ChatList = () => {
   const dispatch = useDispatch();
   const navigate = useNavigate();
-  const joinedChatIdsRef = useRef(new Set());
 
   const user = useSelector((state) => state.auth.user);
   const chats = useSelector((state) => state.chat.chats);
   const chatsStatus = useSelector((state) => state.chat.chatsStatus);
   const chatsError = useSelector((state) => state.chat.chatsError);
   const onlineUsers = useSelector((state) => state.chat.onlineUsers);
+  const lastSeenByUser = useSelector((state) => state.chat.lastSeenByUser);
 
   const currentUserId = toId(user?._id || user?.id);
 
   useEffect(() => {
-    dispatch(getMyChats());
-    connectChatSocket();
-  }, [dispatch]);
-
-  useEffect(() => {
-    if (!currentUserId) return undefined;
-
-    const unsubscribers = [
-      onReceiveMessage((payload) =>
-        dispatch(socketMessageReceived({ ...payload, currentUserId }))
-      ),
-      onMessageSeen((payload) => dispatch(socketMessageSeen(payload))),
-      onMessageDelivered((payload) => dispatch(socketMessageDelivered(payload))),
-      onTyping((payload) => dispatch(socketTyping(payload))),
-      onStopTyping((payload) => dispatch(socketStopTyping(payload))),
-      onUserOnline((payload) => dispatch(socketUserOnline(payload))),
-      onUserOffline((payload) => dispatch(socketUserOffline(payload))),
-    ];
-
-    return () => {
-      unsubscribers.forEach((unsubscribe) => unsubscribe?.());
-    };
-  }, [currentUserId, dispatch]);
-
-  useEffect(() => {
-    chats.forEach((chat) => {
-      const chatId = toId(chat?._id);
-      if (!chatId || joinedChatIdsRef.current.has(chatId)) return;
-      joinedChatIdsRef.current.add(chatId);
-      joinChat(chatId).catch(() => {});
-    });
-  }, [chats]);
-
-  useEffect(
-    () => () => {
-      const ids = Array.from(joinedChatIdsRef.current);
-      ids.forEach((chatId) => {
-        leaveChat(chatId).catch(() => {});
-      });
-      joinedChatIdsRef.current.clear();
-    },
-    []
-  );
+    if (chatsStatus === 'idle') {
+      dispatch(getMyChats());
+    }
+  }, [dispatch, chatsStatus]);
 
   const chatItems = useMemo(
     () =>
@@ -137,9 +91,11 @@ const ChatList = () => {
           to,
           timeLabel: formatTime(chat?.lastMessageAt || chat?.updatedAt),
           isOnline: Boolean(onlineUsers[otherUserId]),
+          lastSeen: lastSeenByUser[otherUserId] || '',
+          chatKind: chat?.chatKind || 'ride',
         };
       }),
-    [chats, currentUserId, onlineUsers]
+    [chats, currentUserId, onlineUsers, lastSeenByUser]
   );
 
   if (chatsStatus === 'loading') {
@@ -228,6 +184,14 @@ const ChatList = () => {
                     <p className="mt-1 truncate text-sm text-slate-600">{item.lastMessage}</p>
                     <p className="mt-1 truncate text-xs text-slate-400">
                       {item.from} to {item.to}
+                    </p>
+                    {item.chatKind === 'inquiry' ? (
+                      <p className="mt-1 text-[11px] font-semibold text-amber-600">
+                        Inquiry chat
+                      </p>
+                    ) : null}
+                    <p className="mt-1 text-[11px] font-semibold text-slate-400">
+                      {item.isOnline ? 'online' : formatLastSeen(item.lastSeen) || 'offline'}
                     </p>
                   </div>
 

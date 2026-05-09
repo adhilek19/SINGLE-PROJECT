@@ -7,14 +7,17 @@ import {
   User,
   LogOut,
   House,
+  MessageCircle,
 } from 'lucide-react';
 import { useDispatch, useSelector } from 'react-redux';
 import { logoutThunk } from '../redux/slices/authSlice';
+import { selectChatUnreadCount } from '../redux/slices/chatSlice';
 
 const Navbar = () => {
   const navigate = useNavigate();
   const dispatch = useDispatch();
   const { user, isHydrated, isInitializing } = useSelector((s) => s.auth);
+  const unreadCount = useSelector(selectChatUnreadCount);
   const authReady = isHydrated && !isInitializing;
 
   const handleLogout = () => {
@@ -27,6 +30,7 @@ const Navbar = () => {
     { name: 'Find', path: '/find-ride', icon: Search },
     { name: 'Post', path: '/post-ride', icon: PlusCircle, center: true },
     { name: 'Rides', path: '/my-rides', icon: Car },
+    { name: 'Messages', path: user ? '/chats' : '/login', icon: MessageCircle },
     { name: 'Profile', path: user ? '/profile' : '/login', icon: User },
   ];
 
@@ -67,7 +71,7 @@ const Navbar = () => {
 
             <div className="flex items-center space-x-8">
               <div className="flex space-x-6">
-                {navLinks.slice(0, 4).map((link) => {
+                {navLinks.slice(0, 5).map((link) => {
                   const Icon = link.icon;
 
                   return (
@@ -84,6 +88,11 @@ const Navbar = () => {
                     >
                       <Icon className="w-4 h-4" />
                       {link.name === 'Find' ? 'Find Ride' : link.name === 'Rides' ? 'My Rides' : link.name}
+                      {link.name === 'Messages' && unreadCount > 0 ? (
+                        <span className="inline-flex min-w-5 items-center justify-center rounded-full bg-emerald-600 px-1.5 text-[10px] font-black text-white">
+                          {unreadCount > 99 ? '99+' : unreadCount}
+                        </span>
+                      ) : null}
                     </NavLink>
                   );
                 })}
@@ -94,6 +103,19 @@ const Navbar = () => {
                   <div className="w-20 h-4 bg-slate-200 rounded animate-pulse" />
                 ) : user ? (
                   <>
+                    <Link
+                      to="/chats"
+                      className="relative rounded-lg p-2 text-slate-600 hover:bg-slate-100 hover:text-blue-600"
+                      title="Messages"
+                    >
+                      <MessageCircle className="h-5 w-5" />
+                      {unreadCount > 0 ? (
+                        <span className="absolute -right-1 -top-1 inline-flex min-w-5 items-center justify-center rounded-full bg-emerald-600 px-1.5 text-[10px] font-black text-white">
+                          {unreadCount > 99 ? '99+' : unreadCount}
+                        </span>
+                      ) : null}
+                    </Link>
+
                     <Link
                       to="/profile"
                       className="flex items-center gap-2 hover:text-blue-600"
@@ -150,9 +172,19 @@ const Navbar = () => {
           {!authReady ? (
             <div className="w-9 h-9 rounded-full bg-slate-200 animate-pulse" />
           ) : user ? (
-            <Link to="/profile">
-              <Avatar size="large" />
-            </Link>
+            <div className="flex items-center gap-3">
+              <Link to="/chats" className="relative rounded-lg p-1.5 text-slate-600">
+                <MessageCircle className="h-5 w-5" />
+                {unreadCount > 0 ? (
+                  <span className="absolute -right-1 -top-1 inline-flex min-w-5 items-center justify-center rounded-full bg-emerald-600 px-1.5 text-[10px] font-black text-white">
+                    {unreadCount > 99 ? '99+' : unreadCount}
+                  </span>
+                ) : null}
+              </Link>
+              <Link to="/profile">
+                <Avatar size="large" />
+              </Link>
+            </div>
           ) : (
             <Link
               to="/login"
@@ -166,7 +198,7 @@ const Navbar = () => {
 
       {/* Mobile Bottom Navbar */}
       <nav className="md:hidden fixed bottom-0 left-0 right-0 z-50 bg-white/95 backdrop-blur-xl border-t border-slate-200 shadow-[0_-8px_30px_rgba(15,23,42,0.12)]">
-        <div className="grid grid-cols-5 h-16 px-2">
+        <div className="grid grid-cols-6 h-16 px-2">
           {navLinks.map((link) => {
             const Icon = link.icon;
 
@@ -213,6 +245,11 @@ const Navbar = () => {
                     <span className={link.center ? '-mt-1' : ''}>
                       {link.name}
                     </span>
+                    {link.name === 'Messages' && unreadCount > 0 ? (
+                      <span className="absolute right-4 top-1.5 inline-flex min-w-5 items-center justify-center rounded-full bg-emerald-600 px-1.5 text-[10px] font-black text-white">
+                        {unreadCount > 99 ? '99+' : unreadCount}
+                      </span>
+                    ) : null}
 
                     {isActive && !link.center && (
                       <span className="absolute bottom-1 w-1.5 h-1.5 rounded-full bg-blue-600" />

@@ -83,6 +83,7 @@ const resolveRideRole = async ({ rideId, user }) => {
 };
 
 const onlineSocketCounts = new Map();
+const lastSeenByUser = new Map();
 
 const increaseOnlineCount = (userId) => {
   const current = Number(onlineSocketCounts.get(userId) || 0);
@@ -151,8 +152,15 @@ export const initSocket = ({ httpServer }) => {
     const personalRoom = userRoomName(currentUserId);
     socket.join(personalRoom);
 
+    socket.emit('online_users', {
+      userIds: Array.from(onlineSocketCounts.keys()),
+      lastSeenByUser: Object.fromEntries(lastSeenByUser.entries()),
+      at: new Date().toISOString(),
+    });
+
     const becameOnline = increaseOnlineCount(currentUserId);
     if (becameOnline) {
+      lastSeenByUser.delete(currentUserId);
       io.emit('user_online', {
         userId: currentUserId,
         at: new Date().toISOString(),
@@ -214,6 +222,7 @@ export const initSocket = ({ httpServer }) => {
           chatId: payload.chatId,
           senderId: socket.user._id,
           text: payload.text,
+          clientMessageId: payload.clientMessageId,
         });
 
         let messagePayload = result.message;
@@ -352,6 +361,35 @@ export const initSocket = ({ httpServer }) => {
       }
     });
 
+    socket.on('message_reaction', async (payload = {}, ack) => {
+      try {
+        const messageId = String(payload.messageId || '').trim();
+        const emoji = String(payload.emoji || '').trim();
+        if (!messageId) throw new Error('messageId is required');
+
+        const message = await messageService.reactToMessage({
+          messageId,
+          userId: socket.user._id,
+          emoji,
+        });
+
+        io.to(chatRoomName(message.chat)).emit('message_reaction', {
+          chatId: toId(message.chat),
+          messageId: toId(message._id),
+          userId: currentUserId,
+          message,
+        });
+
+        if (typeof ack === 'function') {
+          ack({ ok: true, message });
+        }
+      } catch (err) {
+        if (typeof ack === 'function') {
+          ack({ ok: false, message: err.message || 'message_reaction failed' });
+        }
+      }
+    });
+
     socket.on('joinRide', async (payload = {}, ack) => {
       try {
         const rideId = String(payload.rideId || '').trim();
@@ -466,9 +504,12 @@ export const initSocket = ({ httpServer }) => {
     socket.on('disconnect', () => {
       const becameOffline = decreaseOnlineCount(currentUserId);
       if (becameOffline) {
+        const lastSeenAt = new Date().toISOString();
+        lastSeenByUser.set(currentUserId, lastSeenAt);
         io.emit('user_offline', {
           userId: currentUserId,
-          at: new Date().toISOString(),
+          at: lastSeenAt,
+          lastSeenAt,
         });
       }
     });

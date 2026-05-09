@@ -20,6 +20,18 @@ export const messageRepository = {
     return Message.findById(id);
   },
 
+  findByClientMessageId({ chatId, senderId, clientMessageId }) {
+    const key = String(clientMessageId || '').trim();
+    if (!key) return Promise.resolve(null);
+    return populateMessage(
+      Message.findOne({
+        chat: chatId,
+        sender: senderId,
+        clientMessageId: key,
+      })
+    );
+  },
+
   getChatMessages({ chatId, page = 1, limit = 50 }) {
     const pageNum = Math.max(1, Number(page) || 1);
     const limitNum = Math.min(100, Math.max(1, Number(limit) || 50));
@@ -96,5 +108,40 @@ export const messageRepository = {
         $addToSet: { deliveredTo: userId },
       }
     );
+  },
+
+  async setReaction({ messageId, userId, emoji }) {
+    const message = await Message.findById(messageId);
+    if (!message) return null;
+
+    const actor = String(userId || '');
+    const reactions = Array.isArray(message.reactions) ? [...message.reactions] : [];
+    const existingIndex = reactions.findIndex(
+      (entry) => String(entry?.user || '') === actor
+    );
+
+    const normalizedEmoji = String(emoji || '').trim();
+    if (!normalizedEmoji) {
+      if (existingIndex >= 0) {
+        reactions.splice(existingIndex, 1);
+      }
+    } else if (existingIndex >= 0) {
+      reactions[existingIndex] = {
+        ...reactions[existingIndex],
+        user: reactions[existingIndex].user,
+        emoji: normalizedEmoji,
+        createdAt: new Date(),
+      };
+    } else {
+      reactions.push({
+        user: userId,
+        emoji: normalizedEmoji,
+        createdAt: new Date(),
+      });
+    }
+
+    message.reactions = reactions;
+    await message.save();
+    return this.findById(messageId);
   },
 };

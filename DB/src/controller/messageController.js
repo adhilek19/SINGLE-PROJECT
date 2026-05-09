@@ -80,6 +80,10 @@ const uploadBufferToCloudinary = (file, folder) =>
 const dispatchMessageToChat = async ({ result }) => {
   let messagePayload = result.message;
 
+  if (result?.deduped) {
+    return messagePayload;
+  }
+
   const delivered = await maybeMarkDeliveredIfUserOnline({
     message: result.message,
     receiverId: result.receiverId,
@@ -101,12 +105,13 @@ const dispatchMessageToChat = async ({ result }) => {
 
 export const sendMessage = async (req, res, next) => {
   try {
-    const { chatId, text } = req.body || {};
+    const { chatId, text, clientMessageId } = req.body || {};
 
     const result = await messageService.sendTextMessage({
       chatId,
       senderId: req.userId,
       text,
+      clientMessageId,
     });
 
     const messagePayload = await dispatchMessageToChat({ result });
@@ -122,7 +127,7 @@ export const sendMessage = async (req, res, next) => {
 export const sendMediaMessage = async (req, res, next) => {
   let uploadedPublicId = '';
   try {
-    const { chatId } = req.body || {};
+    const { chatId, clientMessageId } = req.body || {};
     if (!chatId) throw BadRequest('chatId is required');
     if (!req.file) throw BadRequest('Media file is required');
 
@@ -147,7 +152,24 @@ export const sendMediaMessage = async (req, res, next) => {
       chatId,
       senderId: req.userId,
       media,
+      clientMessageId,
     });
+
+    if (
+      result?.deduped &&
+      uploadedPublicId &&
+      String(result?.message?.publicId || '') !== uploadedPublicId
+    ) {
+      try {
+        await cloudinary.uploader.destroy(uploadedPublicId, {
+          resource_type: 'auto',
+        });
+      } catch {
+        // ignore cleanup errors
+      } finally {
+        uploadedPublicId = '';
+      }
+    }
 
     const messagePayload = await dispatchMessageToChat({ result });
 
@@ -209,6 +231,32 @@ export const softDeleteMessage = async (req, res, next) => {
     }
 
     return successResponse(res, 200, 'Message deleted', {
+      message,
+    });
+  } catch (err) {
+    next(err);
+  }
+};
+
+export const setMessageReaction = async (req, res, next) => {
+  try {
+    const message = await messageService.reactToMessage({
+      messageId: req.params.messageId,
+      userId: req.userId,
+      emoji: req.body?.emoji || '',
+    });
+
+    const io = getSocketIO();
+    if (io) {
+      io.to(chatRoomName(message.chat)).emit('message_reaction', {
+        chatId: toId(message.chat),
+        messageId: toId(message._id),
+        userId: toId(req.userId),
+        message,
+      });
+    }
+
+    return successResponse(res, 200, 'Reaction updated', {
       message,
     });
   } catch (err) {

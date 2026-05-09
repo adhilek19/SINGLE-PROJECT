@@ -586,6 +586,11 @@ const RideDetails = () => {
   };
 
   const handleOpenChat = async (targetUserId) => {
+    if (!token) {
+      navigate('/login');
+      return;
+    }
+
     const safeTargetId = toId(targetUserId);
     if (!safeTargetId) {
       toast.error('Unable to open chat for this user');
@@ -860,7 +865,14 @@ const RideDetails = () => {
                 <div className="flex flex-wrap gap-2">
                   {['pending', 'accepted'].includes(myLatestRequest.status) && <button onClick={() => handleConfirmPickup(myLatestRequest._id)} className="rounded-xl bg-blue-600 px-4 py-2 font-bold text-white">Confirm pickup with GPS</button>}
                   {['pending', 'accepted'].includes(myLatestRequest.status) && <button onClick={() => handleCancelRequest(myLatestRequest._id)} disabled={!isScheduled || requestActionLoading[`cancel-${myLatestRequest._id}`]} className="rounded-xl bg-slate-900 px-4 py-2 font-bold text-white disabled:opacity-60">{requestActionLoading[`cancel-${myLatestRequest._id}`] ? 'Cancelling...' : 'Cancel Request'}</button>}
-                  {hasAcceptedRequest && driverId ? <button onClick={() => handleOpenChat(driverId)} className="rounded-xl bg-emerald-600 px-4 py-2 font-bold text-white">Message Driver</button> : null}
+                  {driverId ? (
+                    <button
+                      onClick={() => handleOpenChat(driverId)}
+                      className="rounded-xl bg-emerald-600 px-4 py-2 font-bold text-white"
+                    >
+                      {hasAcceptedRequest ? 'Message Driver' : 'Message Driver (Inquiry)'}
+                    </button>
+                  ) : null}
                   {['pending', 'accepted'].includes(myLatestRequest.status) && <button onClick={() => handleMarkNoShow(myLatestRequest._id)} className="rounded-xl bg-amber-600 px-4 py-2 font-bold text-white">Driver no-show</button>}
                 </div>
               </div>
@@ -874,7 +886,14 @@ const RideDetails = () => {
                 <button onClick={handleCreateRequest} disabled={!canRequestRide || requestActionLoading.create || isPastScheduled} className="rounded-xl bg-slate-900 px-4 py-3 font-bold text-white disabled:opacity-60">
                   {isDriver ? 'Your ride' : !isRideBookable ? (seatsLeft <= 0 ? 'Full' : 'Unavailable') : requestActionLoading.create ? 'Requesting...' : 'Request Ride'}
                 </button>
-                {hasAcceptedRequest && driverId ? <button onClick={() => handleOpenChat(driverId)} className="rounded-xl bg-emerald-600 px-4 py-2 font-bold text-white">Message Driver</button> : null}
+                {driverId ? (
+                  <button
+                    onClick={() => handleOpenChat(driverId)}
+                    className="rounded-xl bg-emerald-600 px-4 py-2 font-bold text-white"
+                  >
+                    Message Driver (Inquiry)
+                  </button>
+                ) : null}
                 {hasPendingRequest ? <p className="text-xs font-bold text-blue-700">Requested</p> : null}
                 {hasAcceptedRequest ? <p className="text-xs font-bold text-emerald-700">Booked</p> : null}
               </div>
@@ -899,6 +918,7 @@ const RideDetails = () => {
                 <div className="flex flex-wrap gap-2">
                   <button onClick={() => handleAcceptRequest(req._id)} disabled={Boolean(requestActionLoading[`accept-${req._id}`] || requestActionLoading[`reject-${req._id}`])} className="rounded-xl bg-emerald-600 px-3 py-2 font-bold text-white disabled:opacity-60">{requestActionLoading[`accept-${req._id}`] ? 'Accepting...' : 'Accept & Generate PIN'}</button>
                   <button onClick={() => handleRejectRequest(req._id)} disabled={Boolean(requestActionLoading[`accept-${req._id}`] || requestActionLoading[`reject-${req._id}`])} className="rounded-xl bg-rose-600 px-3 py-2 font-bold text-white disabled:opacity-60">{requestActionLoading[`reject-${req._id}`] ? 'Rejecting...' : 'Reject'}</button>
+                  <button onClick={() => handleOpenChat(toId(req.passenger))} className="rounded-xl bg-emerald-600 px-3 py-2 font-bold text-white">Message Passenger</button>
                   <button onClick={() => handleMarkNoShow(req._id)} className="rounded-xl bg-amber-600 px-3 py-2 font-bold text-white">Mark no-show</button>
                 </div>
               </div>

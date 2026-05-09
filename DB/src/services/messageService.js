@@ -15,11 +15,31 @@ const createMessageInChat = async ({
   type,
   text = '',
   media = null,
+  clientMessageId = '',
 }) => {
   const access = await ensureChatAccess({ chatId, userId: senderId });
   const sender = toId(senderId);
   const receiverId =
     sender === access.driverId ? access.passengerId : access.driverId;
+  const safeClientMessageId = String(clientMessageId || '').trim();
+
+  if (safeClientMessageId) {
+    const existing = await messageRepository.findByClientMessageId({
+      chatId: access.chatId,
+      senderId: sender,
+      clientMessageId: safeClientMessageId,
+    });
+
+    if (existing) {
+      return {
+        message: sanitizeMessage(existing),
+        receiverId,
+        chatId: access.chatId,
+        rideId: toId(access.ride._id),
+        deduped: true,
+      };
+    }
+  }
 
   const messagePayload = {
     chat: access.chatId,
@@ -28,6 +48,7 @@ const createMessageInChat = async ({
     receiver: receiverId,
     type,
     text,
+    clientMessageId: safeClientMessageId,
     seenBy: [sender],
     deliveredTo: [sender],
     isDeleted: false,
@@ -58,11 +79,12 @@ const createMessageInChat = async ({
     receiverId,
     chatId: access.chatId,
     rideId: toId(access.ride._id),
+    deduped: false,
   };
 };
 
 export const messageService = {
-  async sendTextMessage({ chatId, senderId, text }) {
+  async sendTextMessage({ chatId, senderId, text, clientMessageId = '' }) {
     const content = String(text || '').trim();
     if (!content) throw BadRequest('Message text is required');
 
@@ -71,10 +93,11 @@ export const messageService = {
       senderId,
       type: 'text',
       text: content,
+      clientMessageId,
     });
   },
 
-  async sendMediaMessage({ chatId, senderId, media }) {
+  async sendMediaMessage({ chatId, senderId, media, clientMessageId = '' }) {
     if (!media?.url || !media?.publicId) {
       throw BadRequest('Media upload failed');
     }
@@ -93,6 +116,7 @@ export const messageService = {
       type: mediaType,
       text: '',
       media,
+      clientMessageId,
     });
   },
 
@@ -201,6 +225,26 @@ export const messageService = {
     }
 
     const updated = await messageRepository.findById(rawMessage._id);
+    return sanitizeMessage(updated || rawMessage);
+  },
+
+  async reactToMessage({ messageId, userId, emoji }) {
+    const rawMessage = await messageRepository.findRawById(messageId);
+    if (!rawMessage) throw NotFound('Message not found');
+
+    await ensureChatAccess({ chatId: rawMessage.chat, userId });
+
+    const normalizedEmoji = String(emoji || '').trim();
+    if (normalizedEmoji.length > 16) {
+      throw BadRequest('Reaction emoji is too long');
+    }
+
+    const updated = await messageRepository.setReaction({
+      messageId: rawMessage._id,
+      userId: toId(userId),
+      emoji: normalizedEmoji,
+    });
+
     return sanitizeMessage(updated || rawMessage);
   },
 };

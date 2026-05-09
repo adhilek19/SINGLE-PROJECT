@@ -29,6 +29,14 @@ export const chatService = {
     });
 
     if (existingChat) {
+      if (
+        existingChat.chatKind === 'inquiry' &&
+        pair.chatKind === 'ride' &&
+        typeof existingChat.save === 'function'
+      ) {
+        existingChat.chatKind = 'ride';
+        await chatRepository.save(existingChat);
+      }
       return normalizeUnreadCounts(existingChat, requesterId);
     }
 
@@ -41,6 +49,7 @@ export const chatService = {
       await chatRepository.create({
         ride: rideId,
         participants: pair.participants,
+        chatKind: pair.chatKind || 'ride',
         unreadCounts,
         lastMessage: null,
         lastMessageAt: null,

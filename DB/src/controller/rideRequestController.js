@@ -1,5 +1,11 @@
 import { successResponse } from '../utils/apiResponse.js';
 import { rideRequestService } from '../services/rideRequestService.js';
+import {
+  emitRideJoinAccepted,
+  emitRideJoinRejected,
+  emitRideJoinRequested,
+  emitRideUpdated,
+} from '../socket/rideEvents.js';
 
 export const createRideRequest = async (req, res, next) => {
   try {
@@ -8,6 +14,7 @@ export const createRideRequest = async (req, res, next) => {
       req.userId,
       req.body
     );
+    emitRideJoinRequested(result?.request);
 
     return successResponse(res, 201, 'Ride request created', result);
   } catch (err) {
@@ -49,6 +56,7 @@ export const acceptRideRequest = async (req, res, next) => {
       req.params.requestId,
       req.userId
     );
+    emitRideJoinAccepted(request);
 
     return successResponse(res, 200, 'Ride request accepted', { request });
   } catch (err) {
@@ -62,6 +70,7 @@ export const rejectRideRequest = async (req, res, next) => {
       req.params.requestId,
       req.userId
     );
+    emitRideJoinRejected(request);
 
     return successResponse(res, 200, 'Ride request rejected', { request });
   } catch (err) {
@@ -75,6 +84,7 @@ export const cancelRideRequest = async (req, res, next) => {
       req.params.requestId,
       req.userId
     );
+    emitRideJoinRejected(request);
 
     return successResponse(res, 200, 'Ride request cancelled', { request });
   } catch (err) {
@@ -90,6 +100,7 @@ export const confirmPickup = async (req, res, next) => {
       req.userId,
       req.body
     );
+    emitRideUpdated(request?.ride);
 
     return successResponse(res, 200, 'Pickup location confirmed', { request });
   } catch (err) {
@@ -104,6 +115,7 @@ export const markNoShow = async (req, res, next) => {
       req.userId,
       req.body.reason
     );
+    emitRideUpdated(request?.ride);
 
     return successResponse(res, 200, 'No-show marked', { request });
   } catch (err) {

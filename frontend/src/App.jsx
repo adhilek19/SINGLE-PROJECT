@@ -17,6 +17,7 @@ import {
 import { setAuthFailureHandler } from './services/api';
 
 import Navbar from './components/Navbar';
+import RealtimeBridge from './components/RealtimeBridge';
 import Home from './pages/Home';
 import Login from './pages/Login';
 import Register from './pages/Register';
@@ -129,6 +130,7 @@ function App() {
     <Router>
       <AuthHandler />
       <TokenHydrator />
+      <RealtimeBridge />
 
       <div className="min-h-screen bg-slate-50 text-slate-900 flex flex-col font-sans">
         <Toaster position="top-center" />

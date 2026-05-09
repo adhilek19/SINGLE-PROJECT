@@ -27,6 +27,12 @@ const emitWithAck = (event, payload = {}) =>
     });
   });
 
+const emitWithoutAck = (event, payload = {}) => {
+  const socket = connectSocket();
+  attachReconnectHandler(socket);
+  socket.emit(event, payload);
+};
+
 const subscribe = (event, handler) => {
   const socket = connectSocket();
   attachReconnectHandler(socket);
@@ -39,7 +45,12 @@ export const connectChatSocket = () => {
   attachReconnectHandler(socket);
   return socket;
 };
+
 export const getChatSocket = () => getSocket();
+
+export const clearJoinedChatState = () => {
+  joinedChatIds.clear();
+};
 
 export const joinChat = (chatId) => {
   const safeChatId = String(chatId || '').trim();
@@ -54,18 +65,46 @@ export const leaveChat = (chatId) => {
   joinedChatIds.delete(safeChatId);
   return emitWithAck('leave_chat', { chatId: safeChatId });
 };
+
 export const sendSocketMessage = ({ chatId, text }) =>
   emitWithAck('send_message', { chatId, text });
-export const sendTyping = (chatId) => emitWithAck('typing', { chatId });
-export const sendStopTyping = (chatId) => emitWithAck('stop_typing', { chatId });
+
+export const sendTyping = (chatId) => {
+  const safeChatId = String(chatId || '').trim();
+  if (!safeChatId) return;
+  emitWithoutAck('typing', { chatId: safeChatId });
+};
+
+export const sendStopTyping = (chatId) => {
+  const safeChatId = String(chatId || '').trim();
+  if (!safeChatId) return;
+  emitWithoutAck('stop_typing', { chatId: safeChatId });
+};
+
 export const sendMessageSeen = (messageId) =>
   emitWithAck('message_seen', { messageId });
+
+export const sendMessageReaction = ({ messageId, emoji }) =>
+  emitWithAck('message_reaction', { messageId, emoji });
 
 export const onReceiveMessage = (handler) => subscribe('receive_message', handler);
 export const onMessageSeen = (handler) => subscribe('message_seen', handler);
 export const onMessageDelivered = (handler) =>
   subscribe('message_delivered', handler);
+export const onMessageReaction = (handler) =>
+  subscribe('message_reaction', handler);
 export const onTyping = (handler) => subscribe('typing', handler);
 export const onStopTyping = (handler) => subscribe('stop_typing', handler);
 export const onUserOnline = (handler) => subscribe('user_online', handler);
 export const onUserOffline = (handler) => subscribe('user_offline', handler);
+export const onOnlineUsers = (handler) => subscribe('online_users', handler);
+
+export const onRideCreated = (handler) => subscribe('ride_created', handler);
+export const onRideUpdated = (handler) => subscribe('ride_updated', handler);
+export const onRideCancelled = (handler) => subscribe('ride_cancelled', handler);
+export const onRideJoinRequested = (handler) =>
+  subscribe('ride_join_requested', handler);
+export const onRideJoinAccepted = (handler) =>
+  subscribe('ride_join_accepted', handler);
+export const onRideJoinRejected = (handler) =>
+  subscribe('ride_join_rejected', handler);

@@ -1,5 +1,7 @@
 import { createAsyncThunk, createSlice } from '@reduxjs/toolkit';
 import { authService, tokenStore } from '../../services/api';
+import { disconnectSocket } from '../../services/socket';
+import { clearJoinedChatState } from '../../services/chatSocket';
 
 const userFromStorageRaw = localStorage.getItem('authUser');
 const userFromStorage = userFromStorageRaw ? JSON.parse(userFromStorageRaw) : null;
@@ -118,6 +120,8 @@ export const logoutThunk = createAsyncThunk('auth/logout', async () => {
   }
 
   tokenStore.clear();
+  clearJoinedChatState();
+  disconnectSocket();
 
   return true;
 });

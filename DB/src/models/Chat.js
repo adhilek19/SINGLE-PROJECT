@@ -32,6 +32,12 @@ const chatSchema = new mongoose.Schema(
       trim: true,
       index: true,
     },
+    chatKind: {
+      type: String,
+      enum: ['ride', 'inquiry'],
+      default: 'ride',
+      index: true,
+    },
     lastMessage: {
       type: mongoose.Schema.Types.ObjectId,
       ref: 'Message',

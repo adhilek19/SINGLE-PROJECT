@@ -6,38 +6,42 @@ import ChatBubble from '../components/chat/ChatBubble';
 import MessageInput from '../components/chat/MessageInput';
 import TypingIndicator from '../components/chat/TypingIndicator';
 import {
+  addOptimisticMessage,
+  clearTypingForChat,
   deleteMessage,
   getMessages,
   getMyChats,
   markMessageSeen,
   sendMediaMessage,
   sendMessage,
+  setMessageReaction,
   setActiveChatId,
-  socketMessageDelivered,
-  socketMessageReceived,
-  socketMessageSeen,
-  socketStopTyping,
-  socketTyping,
-  socketUserOffline,
-  socketUserOnline,
+  setOptimisticMessageStatus,
 } from '../redux/slices/chatSlice';
 import {
-  connectChatSocket,
-  joinChat,
-  leaveChat,
-  onMessageDelivered,
-  onMessageSeen,
-  onReceiveMessage,
-  onStopTyping,
-  onTyping,
-  onUserOffline,
-  onUserOnline,
   sendStopTyping,
   sendTyping,
 } from '../services/chatSocket';
 
 const toId = (value) =>
   (value && typeof value === 'object' ? value._id : value)?.toString?.() || '';
+
+const createClientMessageId = () =>
+  `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+
+const formatLastSeen = (value) => {
+  if (!value) return '';
+  const time = new Date(value).getTime();
+  if (!Number.isFinite(time)) return '';
+  const delta = Math.max(0, Date.now() - time);
+  const mins = Math.floor(delta / (60 * 1000));
+  if (mins < 1) return 'last seen just now';
+  if (mins < 60) return `last seen ${mins}m ago`;
+  const hours = Math.floor(mins / 60);
+  if (hours < 24) return `last seen ${hours}h ago`;
+  const days = Math.floor(hours / 24);
+  return `last seen ${days}d ago`;
+};
 
 const ChatRoom = () => {
   const { chatId } = useParams();
@@ -54,15 +58,14 @@ const ChatRoom = () => {
   const chatsStatus = useSelector((state) => state.chat.chatsStatus);
   const messagesByChat = useSelector((state) => state.chat.messagesByChat);
   const messagesStatusByChat = useSelector((state) => state.chat.messagesStatusByChat);
-  const sendStatusByChat = useSelector((state) => state.chat.sendStatusByChat);
   const typingByChat = useSelector((state) => state.chat.typingByChat);
   const onlineUsers = useSelector((state) => state.chat.onlineUsers);
+  const lastSeenByUser = useSelector((state) => state.chat.lastSeenByUser);
 
   const currentUserId = toId(user?._id || user?.id);
   const safeChatId = toId(chatId);
   const messages = messagesByChat[safeChatId] || [];
   const messageLoadState = messagesStatusByChat[safeChatId] || 'idle';
-  const messageSendState = sendStatusByChat[safeChatId] || 'idle';
 
   const chat = chats.find((entry) => toId(entry?._id) === safeChatId);
   const otherUser = (chat?.participants || []).find(
@@ -70,6 +73,7 @@ const ChatRoom = () => {
   );
   const otherUserId = toId(otherUser);
   const otherUserOnline = Boolean(otherUserId && onlineUsers[otherUserId]);
+  const otherUserLastSeen = lastSeenByUser[otherUserId] || '';
   const typingMap = typingByChat[safeChatId] || {};
   const typingNames = Object.entries(typingMap)
     .filter(([typingUserId]) => typingUserId !== currentUserId)
@@ -77,39 +81,18 @@ const ChatRoom = () => {
 
   useEffect(() => {
     if (!safeChatId) return undefined;
-    connectChatSocket();
     dispatch(setActiveChatId(safeChatId));
     if (chatsStatus === 'idle') {
       dispatch(getMyChats());
     }
     dispatch(getMessages({ chatId: safeChatId }));
-    joinChat(safeChatId).catch(() => {});
 
     return () => {
+      sendStopTyping(safeChatId);
+      dispatch(clearTypingForChat(safeChatId));
       dispatch(setActiveChatId(null));
-      leaveChat(safeChatId).catch(() => {});
     };
   }, [safeChatId, dispatch, chatsStatus]);
-
-  useEffect(() => {
-    if (!currentUserId) return undefined;
-
-    const unsubscribers = [
-      onReceiveMessage((payload) =>
-        dispatch(socketMessageReceived({ ...payload, currentUserId }))
-      ),
-      onMessageSeen((payload) => dispatch(socketMessageSeen(payload))),
-      onMessageDelivered((payload) => dispatch(socketMessageDelivered(payload))),
-      onTyping((payload) => dispatch(socketTyping(payload))),
-      onStopTyping((payload) => dispatch(socketStopTyping(payload))),
-      onUserOnline((payload) => dispatch(socketUserOnline(payload))),
-      onUserOffline((payload) => dispatch(socketUserOffline(payload))),
-    ];
-
-    return () => {
-      unsubscribers.forEach((unsubscribe) => unsubscribe?.());
-    };
-  }, [currentUserId, dispatch]);
 
   useEffect(() => {
     if (!messages.length || !currentUserId) return;
@@ -146,11 +129,40 @@ const ChatRoom = () => {
   }, [chat]);
 
   const handleSend = async (text) => {
+    const clientMessageId = createClientMessageId();
+    const now = new Date().toISOString();
+    const optimisticMessage = {
+      _id: `temp:${clientMessageId}`,
+      clientMessageId,
+      chat: safeChatId,
+      sender: user,
+      receiver: otherUser || otherUserId,
+      type: 'text',
+      text,
+      seenBy: currentUserId ? [currentUserId] : [],
+      deliveredTo: currentUserId ? [currentUserId] : [],
+      reactions: [],
+      isDeleted: false,
+      createdAt: now,
+      updatedAt: now,
+      localStatus: 'sending',
+      localError: null,
+    };
+
+    dispatch(addOptimisticMessage({ chatId: safeChatId, message: optimisticMessage }));
+
     try {
-      await dispatch(sendMessage({ chatId: safeChatId, text })).unwrap();
-      await sendStopTyping(safeChatId).catch(() => {});
+      await dispatch(sendMessage({ chatId: safeChatId, text, clientMessageId })).unwrap();
+      sendStopTyping(safeChatId);
     } catch (err) {
-      toast.error(typeof err === 'string' ? err : 'Failed to send message');
+      dispatch(
+        setOptimisticMessageStatus({
+          chatId: safeChatId,
+          clientMessageId,
+          status: 'failed',
+          error: typeof err === 'string' ? err : 'Failed to send message',
+        })
+      );
     }
   };
 
@@ -169,6 +181,7 @@ const ChatRoom = () => {
         sendMediaMessage({
           chatId: safeChatId,
           file,
+          clientMessageId: createClientMessageId(),
           onUploadProgress: (event) => {
             const total = Number(event?.total || 0);
             const loaded = Number(event?.loaded || 0);
@@ -178,7 +191,7 @@ const ChatRoom = () => {
         })
       ).unwrap();
 
-      await sendStopTyping(safeChatId).catch(() => {});
+      sendStopTyping(safeChatId);
       setMediaUploadProgress(100);
     } catch (err) {
       toast.error(typeof err === 'string' ? err : 'Failed to send media');
@@ -208,14 +221,52 @@ const ChatRoom = () => {
     }
   };
 
+  const handleRetry = async (message) => {
+    const text = String(message?.text || '').trim();
+    const clientMessageId = String(message?.clientMessageId || '').trim();
+    if (!text || !clientMessageId || !safeChatId) return;
+
+    dispatch(
+      setOptimisticMessageStatus({
+        chatId: safeChatId,
+        clientMessageId,
+        status: 'sending',
+        error: null,
+      })
+    );
+
+    try {
+      await dispatch(sendMessage({ chatId: safeChatId, text, clientMessageId })).unwrap();
+    } catch (err) {
+      dispatch(
+        setOptimisticMessageStatus({
+          chatId: safeChatId,
+          clientMessageId,
+          status: 'failed',
+          error: typeof err === 'string' ? err : 'Failed to send message',
+        })
+      );
+    }
+  };
+
+  const handleReact = async (message, emoji) => {
+    const messageId = toId(message?._id);
+    if (!messageId || messageId.startsWith('temp:')) return;
+    try {
+      await dispatch(setMessageReaction({ messageId, emoji })).unwrap();
+    } catch (err) {
+      toast.error(typeof err === 'string' ? err : 'Failed to update reaction');
+    }
+  };
+
   const handleTypingStart = () => {
     if (!safeChatId) return;
-    sendTyping(safeChatId).catch(() => {});
+    sendTyping(safeChatId);
   };
 
   const handleTypingStop = () => {
     if (!safeChatId) return;
-    sendStopTyping(safeChatId).catch(() => {});
+    sendStopTyping(safeChatId);
   };
 
   if (!safeChatId) {
@@ -263,7 +314,13 @@ const ChatRoom = () => {
             <h1 className="truncate text-sm font-black text-slate-900">
               {otherUser?.name || 'Chat'}
             </h1>
-            <p className="truncate text-xs text-slate-500">{rideSummary}</p>
+            {chat?.chatKind === 'inquiry' ? (
+              <p className="text-[11px] font-semibold text-amber-600">Inquiry chat</p>
+            ) : null}
+            <p className="truncate text-xs text-slate-500">
+              {otherUserOnline ? 'online' : formatLastSeen(otherUserLastSeen) || 'offline'}
+            </p>
+            <p className="truncate text-[11px] text-slate-400">{rideSummary}</p>
           </div>
 
           {chat?.ride?._id ? (
@@ -292,7 +349,10 @@ const ChatRoom = () => {
                   message={message}
                   isOwn={isOwn}
                   otherUserId={otherUserId}
+                  currentUserId={currentUserId}
                   onDelete={handleDelete}
+                  onRetry={handleRetry}
+                  onReact={handleReact}
                 />
               );
             })
@@ -307,7 +367,7 @@ const ChatRoom = () => {
           onSendMedia={handleSendMedia}
           onTypingStart={handleTypingStart}
           onTypingStop={handleTypingStop}
-          disabled={messageSendState === 'loading' || mediaUploading}
+          disabled={mediaUploading}
           mediaUploading={mediaUploading}
           mediaUploadProgress={mediaUploadProgress}
         />

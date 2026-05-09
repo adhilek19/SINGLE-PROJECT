@@ -258,12 +258,16 @@ export const chatService = {
   getChatMessages: (chatId, params = {}) =>
     api.get(`/chats/${chatId}/messages`, { params }),
 
-  sendMessage: (payload) => api.post('/messages', payload),
+  sendMessage: ({ chatId, text, clientMessageId }) =>
+    api.post('/messages', { chatId, text, clientMessageId }),
 
-  sendMediaMessage: ({ chatId, file, onUploadProgress }) => {
+  sendMediaMessage: ({ chatId, file, onUploadProgress, clientMessageId }) => {
     const formData = new FormData();
     formData.append('chatId', chatId);
     formData.append('media', file);
+    if (clientMessageId) {
+      formData.append('clientMessageId', clientMessageId);
+    }
 
     return api.post('/messages/media', formData, {
       headers: { 'Content-Type': 'multipart/form-data' },
@@ -272,6 +276,8 @@ export const chatService = {
   },
 
   markMessageSeen: (messageId) => api.patch(`/messages/${messageId}/seen`),
+  setMessageReaction: (messageId, emoji) =>
+    api.patch(`/messages/${messageId}/reaction`, { emoji }),
 
   deleteMessage: (messageId) => api.delete(`/messages/${messageId}`),
 };

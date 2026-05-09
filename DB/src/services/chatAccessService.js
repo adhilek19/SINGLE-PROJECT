@@ -40,6 +40,19 @@ const isAcceptedPassenger = async ({ rideId, userId, rideDoc = null }) => {
   return Boolean(acceptedRequest);
 };
 
+const hasRideRequestContext = async ({ rideId, userId }) => {
+  const passengerId = toId(userId);
+  if (!passengerId) return false;
+
+  const request = await RideRequest.findOne({
+    ride: rideId,
+    passenger: passengerId,
+    status: { $in: ['pending', 'accepted', 'completed'] },
+  }).select('_id');
+
+  return Boolean(request);
+};
+
 export const ensureRideChatPair = async ({
   rideId,
   requesterId,
@@ -67,10 +80,6 @@ export const ensureRideChatPair = async ({
     rideDoc: ride,
   });
 
-  if (!requesterIsDriver && !requesterIsAcceptedPassenger) {
-    throw Forbidden('Only ride driver and accepted passengers can access chat');
-  }
-
   if (requesterIsDriver) {
     const targetIsAcceptedPassenger = await isAcceptedPassenger({
       rideId,
@@ -78,8 +87,17 @@ export const ensureRideChatPair = async ({
       rideDoc: ride,
     });
 
-    if (!targetIsAcceptedPassenger) {
-      throw Forbidden('Driver can only chat with accepted passengers');
+    const targetHasInquiryContext = targetIsAcceptedPassenger
+      ? true
+      : await hasRideRequestContext({
+          rideId,
+          userId: target,
+        });
+
+    if (!targetHasInquiryContext) {
+      throw Forbidden(
+        'Driver can only chat with passengers who requested or joined this ride'
+      );
     }
 
     return {
@@ -87,12 +105,13 @@ export const ensureRideChatPair = async ({
       driverId,
       passengerId: target,
       participants: [driverId, target].sort(),
+      chatKind: targetIsAcceptedPassenger ? 'ride' : 'inquiry',
       requesterRole: 'driver',
     };
   }
 
   if (driverId !== target) {
-    throw Forbidden('Accepted passenger can only chat with ride driver');
+    throw Forbidden('Passenger can only chat with ride driver');
   }
 
   return {
@@ -100,6 +119,7 @@ export const ensureRideChatPair = async ({
     driverId,
     passengerId: requester,
     participants: [driverId, requester].sort(),
+    chatKind: requesterIsAcceptedPassenger ? 'ride' : 'inquiry',
     requesterRole: 'passenger',
   };
 };
@@ -108,7 +128,7 @@ export const ensureChatAccess = async ({ chatId, userId }) => {
   assertObjectId(chatId, 'chat id');
   assertObjectId(userId, 'user id');
 
-  const chat = await Chat.findById(chatId).select('ride participants');
+  const chat = await Chat.findById(chatId).select('ride participants chatKind');
   if (!chat) throw NotFound('Chat not found');
 
   const participantIds = (chat.participants || []).map(toId);
@@ -131,14 +151,16 @@ export const ensureChatAccess = async ({ chatId, userId }) => {
     throw Forbidden('Chat must include one driver and one passenger');
   }
 
-  const passengerStillAccepted = await isAcceptedPassenger({
-    rideId: ride._id,
-    userId: passengerId,
-    rideDoc: ride,
-  });
+  if (chat.chatKind !== 'inquiry') {
+    const passengerStillAccepted = await isAcceptedPassenger({
+      rideId: ride._id,
+      userId: passengerId,
+      rideDoc: ride,
+    });
 
-  if (!passengerStillAccepted) {
-    throw Forbidden('Passenger is not accepted for this ride');
+    if (!passengerStillAccepted) {
+      throw Forbidden('Passenger is not accepted for this ride');
+    }
   }
 
   const otherUserId = participantIds.find((id) => id !== currentUserId) || '';
@@ -150,6 +172,7 @@ export const ensureChatAccess = async ({ chatId, userId }) => {
     ride,
     driverId,
     passengerId,
+    chatKind: chat.chatKind || 'ride',
     role,
     requesterId: currentUserId,
     otherUserId,
