@@ -44,6 +44,14 @@ const envSchema = joi
     WEBRTC_TURN_USERNAME: joi.string().trim().allow('').optional(),
     WEBRTC_TURN_CREDENTIAL: joi.string().trim().allow('').optional(),
     WEBRTC_CALL_RING_TIMEOUT_MS: joi.number().integer().min(5000).max(120000).optional(),
+
+    VAPID_PUBLIC_KEY: joi.string().trim().required(),
+    VAPID_PRIVATE_KEY: joi.string().trim().required(),
+    VAPID_SUBJECT: joi
+      .string()
+      .trim()
+      .pattern(/^(mailto:|https?:\/\/)/)
+      .required(),
   })
   .unknown();
 

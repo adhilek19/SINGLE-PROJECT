@@ -18,6 +18,7 @@ import { setAuthFailureHandler } from './services/api';
 
 import Navbar from './components/Navbar';
 import RealtimeBridge from './components/RealtimeBridge';
+import PushNotificationManager from './components/PushNotificationManager';
 import Home from './pages/Home';
 import Login from './pages/Login';
 import Register from './pages/Register';
@@ -131,6 +132,7 @@ function App() {
       <AuthHandler />
       <TokenHydrator />
       <RealtimeBridge />
+      <PushNotificationManager />
 
       <div className="min-h-screen bg-slate-50 text-slate-900 flex flex-col font-sans">
         <Toaster position="top-center" />

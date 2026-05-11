@@ -69,6 +69,17 @@ const DEFAULT_LIST_QUERY = {
   sort: 'departure_time',
 };
 
+const loadRecentSearchHistory = () => {
+  try {
+    const savedHistory = localStorage.getItem(SEARCH_HISTORY_KEY);
+    if (!savedHistory) return [];
+    const parsed = JSON.parse(savedHistory);
+    return Array.isArray(parsed) ? parsed.slice(0, HISTORY_LIMIT) : [];
+  } catch {
+    return [];
+  }
+};
+
 const EmptyState = ({ title, message }) => (
   <div className="rounded-2xl border border-dashed border-slate-300 bg-white p-10 text-center">
     <div className="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-2xl bg-slate-100 text-slate-500">
@@ -324,7 +335,7 @@ const FindRide = () => {
   const [nearbyCount, setNearbyCount] = useState(0);
   const [searchError, setSearchError] = useState('');
   const [lastSearchParams, setLastSearchParams] = useState(null);
-  const [recentSearches, setRecentSearches] = useState([]);
+  const [recentSearches, setRecentSearches] = useState(loadRecentSearchHistory);
   const [closeSuggestionsSignal, setCloseSuggestionsSignal] = useState(0);
   const [fromCorrectionHint, setFromCorrectionHint] = useState('');
   const [toCorrectionHint, setToCorrectionHint] = useState('');
@@ -895,16 +906,7 @@ const FindRide = () => {
   };
 
   useEffect(() => {
-    const savedHistory = localStorage.getItem(SEARCH_HISTORY_KEY);
-    if (savedHistory) {
-      try {
-        const parsed = JSON.parse(savedHistory);
-        if (Array.isArray(parsed)) setRecentSearches(parsed.slice(0, HISTORY_LIMIT));
-      } catch {
-        // ignore corrupt history
-      }
-    }
-
+    const initTimer = window.setTimeout(() => {
     const paramsFromUrl = {
       from: searchParams.get('from') || searchParams.get('source') || '',
       to: searchParams.get('to') || searchParams.get('destination') || '',
@@ -1108,6 +1110,9 @@ const FindRide = () => {
 
     setSearchStateReady(true);
     void fetchRides(DEFAULT_LIST_QUERY, { mode: 'list', persistSearch: false });
+    }, 0);
+
+    return () => window.clearTimeout(initTimer);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 

@@ -75,7 +75,6 @@ const fetchGeoapify = async ({ query, signal, mode = 'autocomplete' }) => {
   if (!apiKey) {
     if (import.meta.env.DEV && !hasWarnedMissingApiKey) {
       hasWarnedMissingApiKey = true;
-      // eslint-disable-next-line no-console
       console.warn('VITE_GEOAPIFY_API_KEY is missing. Location suggestions are disabled.');
     }
     return [];

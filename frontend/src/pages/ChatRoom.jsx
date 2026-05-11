@@ -35,6 +35,7 @@ import {
   onWebrtcIceCandidate,
   onWebrtcOffer,
   rejectIncomingCall,
+  setActiveChatFocus,
   sendWebrtcAnswer,
   sendWebrtcIceCandidate,
   sendWebrtcOffer,
@@ -96,6 +97,7 @@ const ChatRoom = () => {
   const [incomingCall, setIncomingCall] = useState(null);
   const [callSeconds, setCallSeconds] = useState(0);
   const [isMuted, setIsMuted] = useState(false);
+  const [hasLocalStream, setHasLocalStream] = useState(false);
   const [callActionLoading, setCallActionLoading] = useState(false);
 
   const user = useSelector((state) => state.auth.user);
@@ -109,7 +111,10 @@ const ChatRoom = () => {
 
   const currentUserId = toId(user?._id || user?.id);
   const safeChatId = toId(chatId);
-  const messages = messagesByChat[safeChatId] || [];
+  const messages = useMemo(
+    () => messagesByChat[safeChatId] || [],
+    [messagesByChat, safeChatId]
+  );
   const messageLoadState = messagesStatusByChat[safeChatId] || 'idle';
 
   const chat = chats.find((entry) => toId(entry?._id) === safeChatId);
@@ -150,6 +155,27 @@ const ChatRoom = () => {
       dispatch(setActiveChatId(null));
     };
   }, [safeChatId, dispatch, chatsStatus]);
+
+  useEffect(() => {
+    if (!safeChatId) return undefined;
+
+    const syncChatFocus = () => {
+      const visible = document.visibilityState === 'visible' && document.hasFocus();
+      setActiveChatFocus(safeChatId, visible);
+    };
+
+    syncChatFocus();
+    document.addEventListener('visibilitychange', syncChatFocus);
+    window.addEventListener('focus', syncChatFocus);
+    window.addEventListener('blur', syncChatFocus);
+
+    return () => {
+      setActiveChatFocus(safeChatId, false);
+      document.removeEventListener('visibilitychange', syncChatFocus);
+      window.removeEventListener('focus', syncChatFocus);
+      window.removeEventListener('blur', syncChatFocus);
+    };
+  }, [safeChatId]);
 
   useEffect(() => {
     if (!messages.length || !currentUserId) return;
@@ -217,6 +243,7 @@ const ChatRoom = () => {
       localStreamRef.current.getTracks().forEach((track) => track.stop());
       localStreamRef.current = null;
     }
+    setHasLocalStream(false);
   };
 
   const cleanupCallMedia = () => {
@@ -269,12 +296,13 @@ const ChatRoom = () => {
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       localStreamRef.current = stream;
+      setHasLocalStream(true);
       return stream;
     } catch (err) {
       if (err?.name === 'NotAllowedError') {
-        throw new Error('Microphone permission denied');
+        throw new Error('Microphone permission denied', { cause: err });
       }
-      throw new Error('Unable to access microphone');
+      throw new Error('Unable to access microphone', { cause: err });
     }
   };
 
@@ -977,6 +1005,9 @@ const ChatRoom = () => {
     return () => {
       unsubscribers.forEach((unsubscribe) => unsubscribe?.());
     };
+    // Call listeners intentionally use refs for current call state to avoid
+    // tearing down socket subscriptions on every render.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [safeChatId]);
 
   useEffect(
@@ -993,6 +1024,8 @@ const ChatRoom = () => {
         callStateResetTimerRef.current = null;
       }
     },
+    // Unmount cleanup intentionally reads refs for the latest active call.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
     []
   );
 
@@ -1132,7 +1165,7 @@ const ChatRoom = () => {
                   <button
                     type="button"
                     onClick={toggleMute}
-                    disabled={callActionLoading || !localStreamRef.current}
+                    disabled={callActionLoading || !hasLocalStream}
                     className="inline-flex items-center gap-1 rounded-xl bg-slate-200 px-3 py-2 text-xs font-bold text-slate-700 disabled:opacity-50"
                   >
                     {isMuted ? <MicOff className="h-3.5 w-3.5" /> : <Mic className="h-3.5 w-3.5" />}

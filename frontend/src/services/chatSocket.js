@@ -81,6 +81,15 @@ export const sendStopTyping = (chatId) => {
   emitWithoutAck('stop_typing', { chatId: safeChatId });
 };
 
+export const setActiveChatFocus = (chatId, visible = true) => {
+  const safeChatId = String(chatId || '').trim();
+  if (!safeChatId) return;
+  emitWithoutAck(visible ? 'chat_focus' : 'chat_blur', {
+    chatId: safeChatId,
+    visible,
+  });
+};
+
 export const sendMessageSeen = (messageId) =>
   emitWithAck('message_seen', { messageId });
 

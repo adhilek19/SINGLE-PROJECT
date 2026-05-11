@@ -10,6 +10,8 @@ const QUICK_REACTION_EMOJIS = [
   '\u{1F62E}',
 ];
 
+const EMPTY_REACTIONS = [];
+
 const toId = (value) =>
   (value && typeof value === 'object' ? value._id : value)?.toString?.() || '';
 
@@ -126,7 +128,9 @@ const ChatBubble = ({
   const [reactionPickerOpen, setReactionPickerOpen] = useState(false);
   const seenBy = Array.isArray(message?.seenBy) ? message.seenBy : [];
   const deliveredTo = Array.isArray(message?.deliveredTo) ? message.deliveredTo : [];
-  const reactions = Array.isArray(message?.reactions) ? message.reactions : [];
+  const reactions = Array.isArray(message?.reactions)
+    ? message.reactions
+    : EMPTY_REACTIONS;
   const localStatus = String(message?.localStatus || 'sent');
 
   const isSeenByOther = Boolean(

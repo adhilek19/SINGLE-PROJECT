@@ -73,32 +73,48 @@ const LocationSearch = ({
   const selectionLocked = hasSelectedLocation;
 
   useEffect(() => {
-    const nextValue = (typeof value === 'string' ? value : toLocationName(value)) || defaultValue || '';
-    setQuery(nextValue);
-    if (value && typeof value === 'object' && hasValidCoords(value)) {
-      setHasSelectedLocation(true);
-      setLastSelectedValue(nextValue.trim());
-    } else if (nextValue.trim()) {
-      setHasSelectedLocation(false);
-    } else if (!nextValue.trim()) {
-      setHasSelectedLocation(false);
-      setLastSelectedValue('');
-    }
+    const timer = window.setTimeout(() => {
+      const nextValue =
+        (typeof value === 'string' ? value : toLocationName(value)) ||
+        defaultValue ||
+        '';
+      setQuery(nextValue);
+      if (value && typeof value === 'object' && hasValidCoords(value)) {
+        setHasSelectedLocation(true);
+        setLastSelectedValue(nextValue.trim());
+      } else if (nextValue.trim()) {
+        setHasSelectedLocation(false);
+      } else if (!nextValue.trim()) {
+        setHasSelectedLocation(false);
+        setLastSelectedValue('');
+      }
+    }, 0);
+
+    return () => window.clearTimeout(timer);
   }, [defaultValue, value]);
 
   useEffect(() => {
-    setIsOpen(false);
-    setNoResults(false);
-    setSuggestionsError('');
-    setSuggestions([]);
+    const timer = window.setTimeout(() => {
+      setIsOpen(false);
+      setNoResults(false);
+      setSuggestionsError('');
+      setSuggestions([]);
+    }, 0);
+
+    return () => window.clearTimeout(timer);
   }, [closeSignal]);
 
   useEffect(() => {
     if (!fieldIsActive) {
-      setIsOpen(false);
-      setSuggestions([]);
-      setSuggestionsError('');
+      const timer = window.setTimeout(() => {
+        setIsOpen(false);
+        setSuggestions([]);
+        setSuggestionsError('');
+      }, 0);
+
+      return () => window.clearTimeout(timer);
     }
+    return undefined;
   }, [fieldIsActive]);
 
   useEffect(() => {
@@ -112,7 +128,7 @@ const LocationSearch = ({
 
     document.addEventListener('mousedown', closeDropdown);
     return () => document.removeEventListener('mousedown', closeDropdown);
-  }, []);
+  }, [onCloseAll]);
 
   useEffect(() => {
     const controller = new AbortController();

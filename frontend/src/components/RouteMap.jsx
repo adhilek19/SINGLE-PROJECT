@@ -16,7 +16,6 @@ const ROUTE_DEBUG_ENABLED =
 
 const logRouteDebug = (...args) => {
   if (ROUTE_DEBUG_ENABLED) {
-    // eslint-disable-next-line no-console
     console.log('[RouteMap]', ...args);
   }
 };
@@ -391,11 +390,14 @@ const RouteMap = ({ source, destination, liveLocations = [], height = '360px' })
   useEffect(() => {
     const normalizedDriverLocation = normalizeLocation(driverLiveLocation);
     if (!isValid || !normalizedDriverLocation || !normalizedDestination) {
-      setLiveRouteCoords([]);
-      setLiveDistanceKm(null);
-      setLiveEtaText('');
-      setLiveRouteError('');
-      return undefined;
+      const resetTimer = window.setTimeout(() => {
+        setLiveRouteCoords([]);
+        setLiveDistanceKm(null);
+        setLiveEtaText('');
+        setLiveRouteError('');
+      }, 0);
+
+      return () => window.clearTimeout(resetTimer);
     }
 
     const controller = new AbortController();

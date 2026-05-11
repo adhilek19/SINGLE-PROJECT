@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import {
   BadgeCheck,
@@ -112,7 +112,7 @@ const PublicProfile = () => {
   const [recentPassengerRides, setRecentPassengerRides] = useState([]);
   const [stats, setStats] = useState({});
 
-  const loadProfile = async () => {
+  const loadProfile = useCallback(async () => {
     try {
       setLoading(true);
       setLoadError('');
@@ -131,11 +131,15 @@ const PublicProfile = () => {
     } finally {
       setLoading(false);
     }
-  };
+  }, [id]);
 
   useEffect(() => {
-    loadProfile();
-  }, [id]);
+    const timer = window.setTimeout(() => {
+      loadProfile();
+    }, 0);
+
+    return () => window.clearTimeout(timer);
+  }, [loadProfile]);
 
   if (loading) {
     return (

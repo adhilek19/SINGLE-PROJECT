@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import {
   Calendar,
@@ -188,7 +188,6 @@ const RideDetails = () => {
   const isScheduled = ride?.status === 'scheduled';
   const isStarted = ride?.status === 'started';
   const isEnded = ride?.status === 'ended';
-  const isCompleted = ride?.status === 'completed';
   const seatsLeft = ride ? Number(ride.seatsLeft ?? (ride.seatsAvailable || 0) - (ride.bookedSeats || 0)) : 0;
 
   const myLatestRequest = useMemo(() => {
@@ -202,7 +201,7 @@ const RideDetails = () => {
   const liveLocations = useMemo(() => Object.values(liveLocationsByUser || {}), [liveLocationsByUser]);
   const shareUrl = ride?.shareToken ? `${window.location.origin}/track/${ride.shareToken}` : '';
   const rideReviews = ride?.reviewDetails || [];
-  const passengerTargets = useMemo(() => {
+  const passengerTargets = (() => {
     const targetMap = new Map();
 
     (ride?.passengers || []).forEach((p) => {
@@ -222,9 +221,8 @@ const RideDetails = () => {
       });
 
     return Array.from(targetMap.values());
-  }, [ride?.passengers, rideRequests]);
+  })();
 
-  const isRideActionClosed = ['completed', 'cancelled'].includes(ride?.status);
   const departureTimeMs = ride?.departureTime
     ? new Date(ride.departureTime).getTime()
     : NaN;
@@ -306,27 +304,35 @@ const RideDetails = () => {
   }, [id]);
 
   useEffect(() => {
-    if (ride?._id && token) refreshRequests();
+    if (!ride?._id || !token) return undefined;
+    const timer = window.setTimeout(() => {
+      refreshRequests();
+    }, 0);
+    return () => window.clearTimeout(timer);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [ride?._id, token]);
 
   useEffect(() => {
     if (!Array.isArray(ride?.lastLiveLocations)) return;
 
-    setLiveLocationsByUser((prev) => {
-      const next = { ...prev };
+    const timer = window.setTimeout(() => {
+      setLiveLocationsByUser((prev) => {
+        const next = { ...prev };
 
-      ride.lastLiveLocations.forEach((loc, index) => {
-        const key = toId(loc.user) || loc.userId || `${loc.role || 'user'}-${index}`;
-        next[key] = {
-          ...loc,
-          userId: key,
-          role: loc.role || 'passenger',
-        };
+        ride.lastLiveLocations.forEach((loc, index) => {
+          const key = toId(loc.user) || loc.userId || `${loc.role || 'user'}-${index}`;
+          next[key] = {
+            ...loc,
+            userId: key,
+            role: loc.role || 'passenger',
+          };
+        });
+
+        return next;
       });
+    }, 0);
 
-      return next;
-    });
+    return () => window.clearTimeout(timer);
   }, [ride?.lastLiveLocations]);
 
   const canTrackLive = Boolean(
@@ -339,7 +345,9 @@ const RideDetails = () => {
   useEffect(() => {
     if (!token || !ride?._id) return undefined;
     const socket = connectSocket();
-    setSocketState(socket.connected ? 'connected' : 'connecting');
+    const stateTimer = window.setTimeout(() => {
+      setSocketState(socket.connected ? 'connected' : 'connecting');
+    }, 0);
 
     const onConnect = () => setSocketState('connected');
     const onDisconnect = () => setSocketState('disconnected');
@@ -355,6 +363,7 @@ const RideDetails = () => {
     socket.on('location:broadcast', onBroadcast);
     socket.emit('joinRide', { rideId: ride._id });
     return () => {
+      window.clearTimeout(stateTimer);
       socket.emit('leaveRide', { rideId: ride._id });
       socket.off('connect', onConnect);
       socket.off('disconnect', onDisconnect);

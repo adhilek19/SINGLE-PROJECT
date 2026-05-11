@@ -10,6 +10,7 @@ import { getSocketIO } from '../socket/socketEmitter.js';
 import { cloudinary } from '../utils/cloudinary.js';
 import { BadRequest } from '../utils/AppError.js';
 import { env } from '../config/env.js';
+import { notificationService } from '../services/notificationService.js';
 
 const allowedVoiceMimeTypes = new Set([
   'audio/webm',
@@ -126,6 +127,14 @@ const dispatchMessageToChat = async ({ result }) => {
       message: messagePayload,
     });
   }
+
+  notificationService.notifyChatMessage({
+    receiverId: result.receiverId,
+    senderId: messagePayload?.sender,
+    chatId: result.chatId,
+    rideId: result.rideId,
+    message: messagePayload,
+  });
 
   return messagePayload;
 };

@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Paperclip, Smile, X } from 'lucide-react';
 import VoiceRecorder from './VoiceRecorder';
 
@@ -48,7 +48,6 @@ const MessageInput = ({
 }) => {
   const [value, setValue] = useState('');
   const [selectedFile, setSelectedFile] = useState(null);
-  const [previewUrl, setPreviewUrl] = useState('');
   const [emojiOpen, setEmojiOpen] = useState(false);
   const typingTimerRef = useRef(null);
   const typingActiveRef = useRef(false);
@@ -103,7 +102,6 @@ const MessageInput = ({
 
   const clearSelectedFile = () => {
     setSelectedFile(null);
-    setPreviewUrl('');
     if (fileInputRef.current) {
       fileInputRef.current.value = '';
     }
@@ -139,22 +137,25 @@ const MessageInput = ({
     setEmojiOpen(false);
   };
 
-  useEffect(() => {
+  const previewUrl = useMemo(() => {
     if (!selectedFile) {
-      setPreviewUrl('');
-      return undefined;
+      return '';
     }
 
     const kind = getFileKind(selectedFile);
     if (!['image', 'video', 'audio'].includes(kind)) {
-      setPreviewUrl('');
-      return undefined;
+      return '';
     }
 
-    const objectUrl = URL.createObjectURL(selectedFile);
-    setPreviewUrl(objectUrl);
-    return () => URL.revokeObjectURL(objectUrl);
+    return URL.createObjectURL(selectedFile);
   }, [selectedFile]);
+
+  useEffect(
+    () => () => {
+      if (previewUrl) URL.revokeObjectURL(previewUrl);
+    },
+    [previewUrl]
+  );
 
   useEffect(() => () => clearTypingTimer(), []);
 

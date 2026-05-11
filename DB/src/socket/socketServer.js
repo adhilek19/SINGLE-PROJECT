@@ -13,6 +13,7 @@ import {
 } from '../services/chatAccessService.js';
 import { messageService } from '../services/messageService.js';
 import { callService } from '../services/callService.js';
+import { notificationService } from '../services/notificationService.js';
 
 const RIDE_ROOM_PREFIX = 'ride:';
 const rideRoomName = (rideId) => `${RIDE_ROOM_PREFIX}${rideId}`;
@@ -244,6 +245,8 @@ export const initSocket = ({ httpServer }) => {
     const currentUserId = toId(socket.user?._id);
     const personalRoom = userRoomName(currentUserId);
     socket.join(personalRoom);
+    socket.data.activeChatId = '';
+    socket.data.pageVisible = false;
 
     socket.emit('online_users', {
       userIds: Array.from(onlineSocketCounts.keys()),
@@ -300,6 +303,10 @@ export const initSocket = ({ httpServer }) => {
         const chatId = String(payload.chatId || '').trim();
         if (chatId) {
           await socket.leave(chatRoomName(chatId));
+          if (toId(socket.data.activeChatId) === toId(chatId)) {
+            socket.data.activeChatId = '';
+            socket.data.pageVisible = false;
+          }
         }
         if (typeof ack === 'function') ack({ ok: true });
       } catch (err) {
@@ -307,6 +314,34 @@ export const initSocket = ({ httpServer }) => {
           ack({ ok: false, message: err.message || 'leave_chat failed' });
         }
       }
+    });
+
+    socket.on('chat_focus', async (payload = {}, ack) => {
+      try {
+        const chatId = String(payload.chatId || '').trim();
+        if (!chatId) throw new Error('chatId is required');
+
+        const access = await ensureChatAccess({ chatId, userId: socket.user._id });
+        socket.data.activeChatId = access.chatId;
+        socket.data.pageVisible = payload.visible !== false;
+
+        if (typeof ack === 'function') {
+          ack({ ok: true, chatId: access.chatId });
+        }
+      } catch (err) {
+        if (typeof ack === 'function') {
+          ack({ ok: false, message: err.message || 'chat_focus failed' });
+        }
+      }
+    });
+
+    socket.on('chat_blur', async (payload = {}, ack) => {
+      const chatId = String(payload.chatId || '').trim();
+      if (!chatId || toId(socket.data.activeChatId) === toId(chatId)) {
+        socket.data.activeChatId = '';
+      }
+      socket.data.pageVisible = false;
+      if (typeof ack === 'function') ack({ ok: true });
     });
 
     socket.on('send_message', async (payload = {}, ack) => {
@@ -343,6 +378,16 @@ export const initSocket = ({ httpServer }) => {
           chatId: toId(result.chatId),
           message: messagePayload,
         });
+
+        if (!result?.deduped) {
+          notificationService.notifyChatMessage({
+            receiverId: result.receiverId,
+            senderId: currentUserId,
+            chatId: result.chatId,
+            rideId: result.rideId,
+            message: messagePayload,
+          });
+        }
 
         if (typeof ack === 'function') {
           ack({
@@ -579,6 +624,14 @@ export const initSocket = ({ httpServer }) => {
               reason: 'User is offline',
             },
           });
+          notificationService.notifyMissedCall({
+            calleeId,
+            callerId,
+            callerName: socket.user?.name || 'Someone',
+            chatId: access.chatId,
+            rideId: access.ride?._id,
+            callId: missedCall?._id,
+          });
           throw new Error('User is offline');
         }
 
@@ -597,6 +650,7 @@ export const initSocket = ({ httpServer }) => {
           rideId: toId(access.ride?._id),
           callerId,
           calleeId,
+          callerName: socket.user?.name || 'Someone',
           status: 'ringing',
           createdAt: new Date().toISOString(),
           timeoutHandle: null,
@@ -645,6 +699,15 @@ export const initSocket = ({ httpServer }) => {
             },
           });
 
+          notificationService.notifyMissedCall({
+            calleeId: current.calleeId,
+            callerId: current.callerId,
+            callerName: current.callerName || 'Someone',
+            chatId: current.chatId,
+            rideId: current.rideId,
+            callId: current.callId,
+          });
+
           clearCallSession(callId);
         }, callService.getRingTimeoutMs());
 
@@ -665,6 +728,15 @@ export const initSocket = ({ httpServer }) => {
             },
             status: 'ringing',
           },
+        });
+
+        notificationService.notifyIncomingCall({
+          calleeId,
+          callerId,
+          callerName: socket.user?.name || 'Someone',
+          chatId: access.chatId,
+          rideId: access.ride?._id,
+          callId,
         });
 
         if (typeof ack === 'function') {

@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import {
   User,
   Phone,
@@ -10,11 +10,21 @@ import {
   ShieldCheck,
   Car,
   Users,
+  Bell,
+  BellOff,
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { useDispatch } from 'react-redux';
 import { authService, getErrorMessage } from '../services/api';
 import { setUser } from '../redux/slices/authSlice';
+import {
+  getPushSubscriptionStatus,
+  getNotificationPermission,
+  isPushSupported,
+  requestNotificationPermission,
+  subscribeToPush,
+  unsubscribeFromPush,
+} from '../services/pushNotifications';
 
 const getBrowserLocation = () =>
   new Promise((resolve, reject) => {
@@ -70,6 +80,11 @@ const Profile = () => {
   const [loadError, setLoadError] = useState('');
   const [saving, setSaving] = useState(false);
   const [locationSaving, setLocationSaving] = useState(false);
+  const [pushSaving, setPushSaving] = useState(false);
+  const [notificationStatus, setNotificationStatus] = useState(
+    getNotificationPermission()
+  );
+  const [isPushSubscribed, setIsPushSubscribed] = useState(false);
 
   const [form, setForm] = useState({
     name: '',
@@ -100,7 +115,7 @@ const Profile = () => {
     idVerified: false,
   });
 
-  const syncUser = (user) => {
+  const syncUser = useCallback((user) => {
     const storedUser = JSON.parse(localStorage.getItem('authUser') || '{}');
 
     dispatch(
@@ -122,9 +137,9 @@ const Profile = () => {
         safetyPreferences: user?.safetyPreferences || {},
       })
     );
-  };
+  }, [dispatch]);
 
-  const loadProfile = async () => {
+  const loadProfile = useCallback(async () => {
     try {
       setLoading(true);
       setLoadError('');
@@ -172,11 +187,32 @@ const Profile = () => {
     } finally {
       setLoading(false);
     }
-  };
+  }, [syncUser]);
 
   useEffect(() => {
-    loadProfile();
-  }, [dispatch]);
+    const timer = window.setTimeout(() => {
+      loadProfile();
+    }, 0);
+
+    return () => window.clearTimeout(timer);
+  }, [loadProfile]);
+
+  const refreshPushStatus = useCallback(async () => {
+    const status = await getPushSubscriptionStatus();
+    setNotificationStatus(status.permission);
+    setIsPushSubscribed(Boolean(status.subscribed));
+  }, []);
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      refreshPushStatus().catch(() => {
+        setNotificationStatus(getNotificationPermission());
+        setIsPushSubscribed(false);
+      });
+    }, 0);
+
+    return () => window.clearTimeout(timer);
+  }, [refreshPushStatus]);
 
   const handleChange = (e) => {
     const { name, value } = e.target;
@@ -257,6 +293,52 @@ const Profile = () => {
       toast.error(getErrorMessage(err, 'Unable to update location'));
     } finally {
       setLocationSaving(false);
+    }
+  };
+
+  const handleEnableNotifications = async () => {
+    if (!isPushSupported()) {
+      toast.error('Push notifications are not supported on this browser or connection.');
+      setNotificationStatus('unsupported');
+      return;
+    }
+
+    try {
+      setPushSaving(true);
+      const permission = await requestNotificationPermission();
+      setNotificationStatus(permission);
+
+      if (permission !== 'granted') {
+        toast.error('Notification permission was not granted.');
+        return;
+      }
+
+      await subscribeToPush();
+      setIsPushSubscribed(true);
+      toast.success('Push notifications enabled on this device.');
+    } catch (err) {
+      toast.error(getErrorMessage(err, 'Unable to enable notifications'));
+    } finally {
+      setPushSaving(false);
+      refreshPushStatus().catch(() => {
+        setNotificationStatus(getNotificationPermission());
+      });
+    }
+  };
+
+  const handleDisableNotifications = async () => {
+    try {
+      setPushSaving(true);
+      await unsubscribeFromPush();
+      setIsPushSubscribed(false);
+      toast.success('Push notifications disabled on this device.');
+    } catch (err) {
+      toast.error(getErrorMessage(err, 'Unable to disable notifications'));
+    } finally {
+      setPushSaving(false);
+      refreshPushStatus().catch(() => {
+        setNotificationStatus(getNotificationPermission());
+      });
     }
   };
 
@@ -387,6 +469,48 @@ const Profile = () => {
                 <button type="button" onClick={handleUpdateLocation} disabled={locationSaving} className="w-full md:w-auto bg-slate-900 text-white px-5 py-3 rounded-xl font-bold hover:bg-slate-800 disabled:opacity-60 flex items-center justify-center gap-2">
                   <Navigation className="w-5 h-5" />{locationSaving ? 'Updating...' : 'Allow / Use my location'}
                 </button>
+              </div>
+            </section>
+
+            <section className="rounded-2xl border border-blue-200 bg-blue-50 p-4 md:p-5">
+              <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
+                <div>
+                  <h2 className="text-xl font-bold flex items-center gap-2">
+                    <Bell className="w-5 h-5 text-blue-700" />
+                    Push Notifications
+                  </h2>
+                  <p className="mt-1 text-sm text-slate-600">
+                    Get chat, call, and ride request alerts when SahaYatri is in the background.
+                  </p>
+                  <p className="mt-2 text-xs font-bold uppercase tracking-wide text-blue-700">
+                    Status: {isPushSubscribed ? 'subscribed' : notificationStatus}
+                  </p>
+                </div>
+                {isPushSubscribed ? (
+                  <button
+                    type="button"
+                    onClick={handleDisableNotifications}
+                    disabled={pushSaving}
+                    className="flex w-full items-center justify-center gap-2 rounded-xl bg-white px-5 py-3 font-bold text-slate-700 border border-blue-200 hover:bg-blue-100 disabled:opacity-60 md:w-auto"
+                  >
+                    <BellOff className="w-5 h-5" />
+                    {pushSaving ? 'Updating...' : 'Disable on this device'}
+                  </button>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={handleEnableNotifications}
+                    disabled={pushSaving || notificationStatus === 'denied'}
+                    className="flex w-full items-center justify-center gap-2 rounded-xl bg-blue-600 px-5 py-3 font-bold text-white hover:bg-blue-700 disabled:opacity-60 md:w-auto"
+                  >
+                    <Bell className="w-5 h-5" />
+                    {notificationStatus === 'denied'
+                      ? 'Blocked in browser settings'
+                      : pushSaving
+                        ? 'Enabling...'
+                        : 'Enable notifications'}
+                  </button>
+                )}
               </div>
             </section>
 

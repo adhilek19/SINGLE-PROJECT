@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useParams } from 'react-router-dom';
 import { Calendar, Clock, IndianRupee, MapPin, ShieldCheck, Car } from 'lucide-react';
 import RouteMap from '../components/RouteMap';
@@ -42,8 +42,7 @@ const TrackRide = () => {
         if (!mounted) return;
         setError(err?.response?.data?.message || 'Tracking link not found');
       } finally {
-        if (!mounted) return;
-        if (!silent) setLoading(false);
+        if (mounted && !silent) setLoading(false);
       }
     };
 

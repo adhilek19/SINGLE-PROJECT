@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import {
   Calendar,
@@ -52,7 +52,7 @@ const MyRides = () => {
   const [error, setError] = useState('');
   const [activeTab, setActiveTab] = useState('active');
 
-  const loadRides = async () => {
+  const loadRides = useCallback(async () => {
     try {
       setLoading(true);
       setError('');
@@ -65,11 +65,15 @@ const MyRides = () => {
     } finally {
       setLoading(false);
     }
-  };
+  }, [dispatch]);
 
   useEffect(() => {
-    loadRides();
-  }, [dispatch]);
+    const timer = window.setTimeout(() => {
+      loadRides();
+    }, 0);
+
+    return () => window.clearTimeout(timer);
+  }, [loadRides]);
 
   const allRides = useMemo(() => {
     const ownerRides = createdRides.map((ride) => ({ ...ride, isOwner: true }));

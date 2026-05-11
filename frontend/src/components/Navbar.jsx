@@ -13,6 +13,24 @@ import { useDispatch, useSelector } from 'react-redux';
 import { logoutThunk } from '../redux/slices/authSlice';
 import { selectChatUnreadCount } from '../redux/slices/chatSlice';
 
+const Avatar = ({ user, size = 'small' }) => (
+  <div
+    className={`${
+      size === 'large' ? 'w-9 h-9' : 'w-8 h-8'
+    } rounded-full bg-blue-100 border border-blue-200 flex items-center justify-center text-blue-600 overflow-hidden`}
+  >
+    {user?.profilePic ? (
+      <img
+        src={user.profilePic}
+        alt={user.name || 'Profile'}
+        className="w-full h-full object-cover"
+      />
+    ) : (
+      <User className={size === 'large' ? 'w-5 h-5' : 'w-4 h-4'} />
+    )}
+  </div>
+);
+
 const Navbar = () => {
   const navigate = useNavigate();
   const dispatch = useDispatch();
@@ -33,24 +51,6 @@ const Navbar = () => {
     { name: 'Messages', path: user ? '/chats' : '/login', icon: MessageCircle },
     { name: 'Profile', path: user ? '/profile' : '/login', icon: User },
   ];
-
-  const Avatar = ({ size = 'small' }) => (
-    <div
-      className={`${
-        size === 'large' ? 'w-9 h-9' : 'w-8 h-8'
-      } rounded-full bg-blue-100 border border-blue-200 flex items-center justify-center text-blue-600 overflow-hidden`}
-    >
-      {user?.profilePic ? (
-        <img
-          src={user.profilePic}
-          alt={user.name || 'Profile'}
-          className="w-full h-full object-cover"
-        />
-      ) : (
-        <User className={size === 'large' ? 'w-5 h-5' : 'w-4 h-4'} />
-      )}
-    </div>
-  );
 
   return (
     <>
@@ -120,7 +120,7 @@ const Navbar = () => {
                       to="/profile"
                       className="flex items-center gap-2 hover:text-blue-600"
                     >
-                      <Avatar />
+                      <Avatar user={user} />
                       <span className="text-sm font-medium">
                         Hi, {user.name}
                       </span>
@@ -182,7 +182,7 @@ const Navbar = () => {
                 ) : null}
               </Link>
               <Link to="/profile">
-                <Avatar size="large" />
+                <Avatar user={user} size="large" />
               </Link>
             </div>
           ) : (

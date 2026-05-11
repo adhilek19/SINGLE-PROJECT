@@ -6,6 +6,7 @@ import {
   emitRideJoinRequested,
   emitRideUpdated,
 } from '../socket/rideEvents.js';
+import { notificationService } from '../services/notificationService.js';
 
 export const createRideRequest = async (req, res, next) => {
   try {
@@ -15,6 +16,13 @@ export const createRideRequest = async (req, res, next) => {
       req.body
     );
     emitRideJoinRequested(result?.request);
+    notificationService.notifyRideRequest({
+      driverId: result?.request?.driver,
+      passengerId: result?.request?.passenger,
+      passengerName: result?.request?.passenger?.name,
+      rideId: result?.request?.ride,
+      requestId: result?.request?._id,
+    });
 
     return successResponse(res, 201, 'Ride request created', result);
   } catch (err) {
@@ -57,6 +65,13 @@ export const acceptRideRequest = async (req, res, next) => {
       req.userId
     );
     emitRideJoinAccepted(request);
+    notificationService.notifyRideDecision({
+      passengerId: request?.passenger,
+      driverId: request?.driver,
+      status: 'accepted',
+      rideId: request?.ride,
+      requestId: request?._id,
+    });
 
     return successResponse(res, 200, 'Ride request accepted', { request });
   } catch (err) {
@@ -71,6 +86,13 @@ export const rejectRideRequest = async (req, res, next) => {
       req.userId
     );
     emitRideJoinRejected(request);
+    notificationService.notifyRideDecision({
+      passengerId: request?.passenger,
+      driverId: request?.driver,
+      status: 'rejected',
+      rideId: request?.ride,
+      requestId: request?._id,
+    });
 
     return successResponse(res, 200, 'Ride request rejected', { request });
   } catch (err) {

@@ -1,8 +1,9 @@
-import React, { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { 
-  Calendar, Clock, Users, IndianRupee, 
-  FileText, ArrowRight, Car, Image as ImageIcon, X
+  ArrowRight,
+  Car,
+  Image as ImageIcon,
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { useDispatch, useSelector } from 'react-redux';
@@ -16,7 +17,6 @@ const EditRide = () => {
   const fileInputRef = useRef(null);
   
   const user = useSelector(s => s.auth.user);
-  const ride = useSelector(s => s.rides.selected);
   const currentUserId = user?._id || user?.id;
   
   const [loading, setLoading] = useState(true);
@@ -77,7 +77,7 @@ const EditRide = () => {
           vehicleImage: null
         });
         if (data.vehicle?.image) setImagePreview(data.vehicle.image);
-      } catch (err) {
+      } catch {
         toast.error("Failed to load ride data");
         navigate('/my-rides');
       } finally {
@@ -141,7 +141,7 @@ const EditRide = () => {
       } else {
         toast.error(resultAction.payload || 'Failed to update ride');
       }
-    } catch (error) {
+    } catch {
       toast.error('An unexpected error occurred');
     } finally {
       setSaving(false);
