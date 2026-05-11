@@ -1176,6 +1176,8 @@ export const initSocket = ({ httpServer }) => {
     });
 
     socket.on('disconnect', async () => {
+      socket.data.activeChatId = '';
+      socket.data.pageVisible = false;
       const becameOffline = decreaseOnlineCount(currentUserId);
       if (becameOffline) {
         const activeCallId = toId(userCallLocks.get(currentUserId));

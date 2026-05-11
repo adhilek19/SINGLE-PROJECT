@@ -19,6 +19,7 @@ import { setAuthFailureHandler } from './services/api';
 import Navbar from './components/Navbar';
 import RealtimeBridge from './components/RealtimeBridge';
 import PushNotificationManager from './components/PushNotificationManager';
+import CallProvider from './context/CallProvider';
 import Home from './pages/Home';
 import Login from './pages/Login';
 import Register from './pages/Register';
@@ -133,23 +134,24 @@ function App() {
       <TokenHydrator />
       <RealtimeBridge />
       <PushNotificationManager />
+      <CallProvider>
 
-      <div className="min-h-screen bg-slate-50 text-slate-900 flex flex-col font-sans">
-        <Toaster position="top-center" />
-        {isOffline ? (
-          <div className="bg-amber-100 text-amber-900 text-center text-sm py-2 px-4 border-b border-amber-300">
-            You are offline. Some actions may not work.
-          </div>
-        ) : null}
-        <Navbar />
+        <div className="min-h-screen bg-slate-50 text-slate-900 flex flex-col font-sans">
+          <Toaster position="top-center" />
+          {isOffline ? (
+            <div className="bg-amber-100 text-amber-900 text-center text-sm py-2 px-4 border-b border-amber-300">
+              You are offline. Some actions may not work.
+            </div>
+          ) : null}
+          <Navbar />
 
-        <main className="flex-grow flex flex-col pb-20 md:pb-0">
-          <Routes>
-            <Route path="/" element={<Home />} />
-            <Route path="/find-ride" element={<FindRide />} />
-            <Route path="/ride/:id" element={<RideDetails />} />
-            <Route path="/rides/:id" element={<RideDetails />} />
-            <Route path="/track/:token" element={<LazyPage><TrackRide /></LazyPage>} />
+          <main className="flex-grow flex flex-col pb-20 md:pb-0">
+            <Routes>
+              <Route path="/" element={<Home />} />
+              <Route path="/find-ride" element={<FindRide />} />
+              <Route path="/ride/:id" element={<RideDetails />} />
+              <Route path="/rides/:id" element={<RideDetails />} />
+              <Route path="/track/:token" element={<LazyPage><TrackRide /></LazyPage>} />
 
             <Route
               path="/users/:id"
@@ -278,9 +280,10 @@ function App() {
                 </GuestRoute>
               }
             />
-          </Routes>
-        </main>
-      </div>
+            </Routes>
+          </main>
+        </div>
+      </CallProvider>
     </Router>
   );
 }

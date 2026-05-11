@@ -14,6 +14,12 @@ webPush.setVapidDetails(
 
 const MAX_TITLE_LENGTH = 90;
 const MAX_BODY_LENGTH = 180;
+const isDev = env.NODE_ENV !== 'production';
+
+const debugPushLog = (message, meta = {}) => {
+  if (!isDev) return;
+  logger.info(`[push] ${message} ${JSON.stringify(meta)}`);
+};
 
 const cleanText = (value, maxLength) =>
   String(value || '')
@@ -142,7 +148,7 @@ export const notificationService = {
     };
 
     try {
-      return await PushSubscription.findOneAndUpdate(
+      const saved = await PushSubscription.findOneAndUpdate(
         { endpoint: normalized.endpoint },
         update,
         {
@@ -151,13 +157,24 @@ export const notificationService = {
           setDefaultsOnInsert: true,
         },
       );
+      debugPushLog('subscription saved', {
+        userId: toId(userId),
+        endpoint: normalized.endpoint.slice(0, 120),
+      });
+      return saved;
     } catch (err) {
       if (err?.code !== 11000) throw err;
-      return PushSubscription.findOneAndUpdate(
+      const saved = await PushSubscription.findOneAndUpdate(
         { endpoint: normalized.endpoint },
         update,
         { new: true }
       );
+      debugPushLog('subscription saved', {
+        userId: toId(userId),
+        endpoint: normalized.endpoint.slice(0, 120),
+        deduped: true,
+      });
+      return saved;
     }
   },
 
@@ -176,11 +193,25 @@ export const notificationService = {
     if (!safeUserId) return { sent: 0, removed: 0 };
 
     const subscriptions = await PushSubscription.find({ user: safeUserId });
-    if (!subscriptions.length) return { sent: 0, removed: 0 };
+    if (!subscriptions.length) {
+      debugPushLog('push skipped', {
+        userId: safeUserId,
+        reason: 'no_subscriptions',
+        type: payload?.data?.type || payload?.tag || 'unknown',
+      });
+      return { sent: 0, removed: 0 };
+    }
 
     const body = JSON.stringify(sanitizePayload(payload));
     let sent = 0;
     let removed = 0;
+
+    debugPushLog('push attempted', {
+      userId: safeUserId,
+      subscriptions: subscriptions.length,
+      type: payload?.data?.type || payload?.tag || 'unknown',
+      url: payload?.url || '/',
+    });
 
     await Promise.all(
       subscriptions.map(async (subscription) => {
@@ -195,12 +226,22 @@ export const notificationService = {
           );
 
           sent += 1;
+          debugPushLog('push sent', {
+            userId: safeUserId,
+            endpoint: subscription.endpoint.slice(0, 120),
+            type: payload?.data?.type || payload?.tag || 'unknown',
+          });
           subscription.lastUsedAt = new Date();
           await subscription.save();
         } catch (err) {
           if (isExpiredOrInvalidSubscription(err)) {
             removed += 1;
             await PushSubscription.deleteOne({ _id: subscription._id });
+            debugPushLog('subscription pruned', {
+              userId: safeUserId,
+              endpoint: subscription.endpoint.slice(0, 120),
+              statusCode: Number(err?.statusCode || err?.status),
+            });
             return;
           }
 
@@ -213,8 +254,23 @@ export const notificationService = {
   },
 
   async sendChatMessagePush({ receiverId, senderId, chatId, rideId, message }) {
-    if (!receiverId || toId(receiverId) === toId(senderId)) return;
-    if (await isUserFocusedInChat({ userId: receiverId, chatId })) return;
+    if (!receiverId || toId(receiverId) === toId(senderId)) {
+      debugPushLog('push skipped', {
+        reason: 'sender_is_receiver',
+        type: 'chat_message',
+        chatId: toId(chatId),
+      });
+      return;
+    }
+    if (await isUserFocusedInChat({ userId: receiverId, chatId })) {
+      debugPushLog('push skipped', {
+        reason: 'receiver_focused_in_same_chat',
+        type: 'chat_message',
+        receiverId: toId(receiverId),
+        chatId: toId(chatId),
+      });
+      return;
+    }
 
     const senderName = getSenderName(message);
     await this.sendPushToUser(receiverId, {
@@ -235,8 +291,25 @@ export const notificationService = {
   },
 
   async sendIncomingCallPush({ calleeId, callerId, callerName, chatId, rideId, callId }) {
-    if (!calleeId || toId(calleeId) === toId(callerId)) return;
-    if (await isUserFocusedInChat({ userId: calleeId, chatId })) return;
+    if (!calleeId || toId(calleeId) === toId(callerId)) {
+      debugPushLog('push skipped', {
+        reason: 'sender_is_receiver',
+        type: 'incoming_call',
+        chatId: toId(chatId),
+        callId: toId(callId),
+      });
+      return;
+    }
+    if (await isUserFocusedInChat({ userId: calleeId, chatId })) {
+      debugPushLog('push skipped', {
+        reason: 'receiver_focused_in_same_chat',
+        type: 'incoming_call',
+        receiverId: toId(calleeId),
+        chatId: toId(chatId),
+        callId: toId(callId),
+      });
+      return;
+    }
 
     await this.sendPushToUser(calleeId, {
       title: 'Incoming audio call',
@@ -257,8 +330,25 @@ export const notificationService = {
   },
 
   async sendMissedCallPush({ calleeId, callerId, callerName, chatId, rideId, callId }) {
-    if (!calleeId || toId(calleeId) === toId(callerId)) return;
-    if (await isUserFocusedInChat({ userId: calleeId, chatId })) return;
+    if (!calleeId || toId(calleeId) === toId(callerId)) {
+      debugPushLog('push skipped', {
+        reason: 'sender_is_receiver',
+        type: 'missed_call',
+        chatId: toId(chatId),
+        callId: toId(callId),
+      });
+      return;
+    }
+    if (await isUserFocusedInChat({ userId: calleeId, chatId })) {
+      debugPushLog('push skipped', {
+        reason: 'receiver_focused_in_same_chat',
+        type: 'missed_call',
+        receiverId: toId(calleeId),
+        chatId: toId(chatId),
+        callId: toId(callId),
+      });
+      return;
+    }
 
     await this.sendPushToUser(calleeId, {
       title: 'Missed audio call',
