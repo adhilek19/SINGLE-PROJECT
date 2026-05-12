@@ -51,6 +51,7 @@ router.put(
   rideController.updateRide
 );
 router.put('/:id/status', protect, validate(updateRideStatusSchema), rideController.updateRideStatus);
+router.post('/:id/verify-passenger', protect, rideController.verifyPassenger);
 router.put('/:id/start', protect, rideController.startRide);
 router.put('/:id/end', protect, rideController.endRide);
 router.put('/:id/complete', protect, rideController.completeRide);

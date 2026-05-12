@@ -15,7 +15,7 @@ import {
 import toast from 'react-hot-toast';
 import { useDispatch, useSelector } from 'react-redux';
 import { fetchMyRidesThunk } from '../redux/slices/rideSlice';
-import { getErrorMessage } from '../services/api';
+import { getErrorMessage, rideService } from '../services/api';
 
 const statusStyles = {
   scheduled: 'bg-emerald-100 text-emerald-700 border-emerald-200',
@@ -51,12 +51,38 @@ const MyRides = () => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [activeTab, setActiveTab] = useState('active');
+  const [requestByRideId, setRequestByRideId] = useState({});
 
   const loadRides = useCallback(async () => {
     try {
       setLoading(true);
       setError('');
-      await dispatch(fetchMyRidesThunk()).unwrap();
+      const [ridesPayload, requestsRes] = await Promise.all([
+        dispatch(fetchMyRidesThunk()).unwrap(),
+        rideService.getMyRideRequests().catch(() => null),
+      ]);
+
+      const requests = requestsRes?.data?.data?.requests || [];
+      const mapping = {};
+      requests.forEach((request) => {
+        const rideId =
+          (request?.ride && typeof request.ride === 'object'
+            ? request.ride?._id
+            : request?.ride) || '';
+        if (!rideId) return;
+        const existing = mapping[rideId];
+        if (!existing) {
+          mapping[rideId] = request;
+          return;
+        }
+        const existingTime = new Date(existing?.updatedAt || existing?.createdAt || 0).getTime();
+        const incomingTime = new Date(request?.updatedAt || request?.createdAt || 0).getTime();
+        if (incomingTime >= existingTime) {
+          mapping[rideId] = request;
+        }
+      });
+      setRequestByRideId(mapping);
+      void ridesPayload;
     } catch (err) {
       const message =
         typeof err === 'string' ? err : getErrorMessage(err, 'Failed to load your rides');
@@ -108,6 +134,8 @@ const MyRides = () => {
     const roleLabel = ride.isOwner ? 'Owner' : 'Joined';
     const RoleIcon = ride.isOwner ? Car : CheckCircle2;
     const seats = ride.seatsAvailable ?? ride.availableSeats ?? ride.seats;
+    const myRequest = requestByRideId[ride._id] || null;
+    const showOtp = !ride.isOwner && myRequest?.status === 'accepted' && myRequest?.startPin;
 
     return (
       <article
@@ -187,6 +215,18 @@ const MyRides = () => {
             </div>
           )}
         </div>
+
+        {showOtp ? (
+          <div className="mt-4 rounded-xl border border-emerald-300 bg-emerald-50 p-3 text-center">
+            <p className="text-xs font-bold text-emerald-800">Boarding OTP</p>
+            <p className="mt-1 text-2xl font-black tracking-[0.25em] text-emerald-700">
+              {myRequest.startPin}
+            </p>
+            <p className="mt-1 text-[11px] font-semibold text-slate-600">
+              {myRequest.verifiedBoarding || myRequest.pinVerified ? 'Verified' : 'Pending Verification'}
+            </p>
+          </div>
+        ) : null}
 
         <Link
           to={`/ride/${ride._id}`}

@@ -25,6 +25,14 @@ export const rideRequestRepository = {
     return RideRequest.find({ ride: rideId, status: 'accepted' }).select('+startPin +startPinHash');
   },
 
+  findAcceptedByRideAndPassenger({ rideId, passengerId }) {
+    return RideRequest.findOne({
+      ride: rideId,
+      passenger: passengerId,
+      status: 'accepted',
+    }).select('+startPin +startPinHash');
+  },
+
   findByRide(rideId) {
     return populateRequest(
       RideRequest.find({ ride: rideId }).select('+startPin +startPinHash')

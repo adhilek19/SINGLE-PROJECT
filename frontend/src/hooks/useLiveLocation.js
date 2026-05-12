@@ -101,7 +101,7 @@ export const useLiveLocation = ({
           timestamp: Date.now(),
         };
 
-        socket.emit('location:update', payload);
+        socket.emit('location_update', payload);
         if (onPositionRef.current) onPositionRef.current(payload);
       },
       (error) => {

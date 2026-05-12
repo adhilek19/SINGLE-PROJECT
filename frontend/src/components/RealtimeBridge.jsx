@@ -13,6 +13,7 @@ import {
   socketUserOnline,
 } from '../redux/slices/chatSlice';
 import {
+  fetchMyRidesThunk,
   socketRideCancelled,
   socketRideCreated,
   socketRideUpdated,
@@ -29,6 +30,9 @@ import {
   onReceiveMessage,
   onRideCancelled,
   onRideCreated,
+  onRideStarted,
+  onRideTrackingEnabled,
+  onPassengerVerified,
   onRideJoinAccepted,
   onRideJoinRejected,
   onRideJoinRequested,
@@ -101,6 +105,16 @@ const RealtimeBridge = () => {
   useEffect(() => {
     if (!token || !currentUserId) return undefined;
 
+    const syncMyRides = () => {
+      dispatch(fetchMyRidesThunk());
+    };
+
+    const rideFromPayload = (payload) =>
+      payload?.ride ||
+      (payload?.request?.ride && typeof payload.request.ride === 'object'
+        ? payload.request.ride
+        : null);
+
     const unsubscribers = [
       onReceiveMessage((payload) =>
         dispatch(socketMessageReceived({ ...payload, currentUserId }))
@@ -113,23 +127,59 @@ const RealtimeBridge = () => {
       onOnlineUsers((payload) => dispatch(socketOnlineUsers(payload))),
       onUserOnline((payload) => dispatch(socketUserOnline(payload))),
       onUserOffline((payload) => dispatch(socketUserOffline(payload))),
-      onRideCreated((payload) => dispatch(socketRideCreated(payload))),
-      onRideUpdated((payload) => dispatch(socketRideUpdated(payload))),
-      onRideCancelled((payload) => dispatch(socketRideCancelled(payload))),
+      onRideCreated((payload) => {
+        dispatch(socketRideCreated(payload));
+        syncMyRides();
+      }),
+      onRideUpdated((payload) => {
+        dispatch(socketRideUpdated(payload));
+        syncMyRides();
+      }),
+      onRideCancelled((payload) => {
+        dispatch(socketRideCancelled(payload));
+        syncMyRides();
+      }),
       onRideJoinRequested((payload) => {
-        if (payload?.request?.ride && typeof payload.request.ride === 'object') {
-          dispatch(socketRideUpdated({ ride: payload.request.ride }));
+        const ride = rideFromPayload(payload);
+        if (ride) {
+          dispatch(socketRideUpdated({ ride }));
         }
+        syncMyRides();
       }),
       onRideJoinAccepted((payload) => {
-        if (payload?.request?.ride && typeof payload.request.ride === 'object') {
-          dispatch(socketRideUpdated({ ride: payload.request.ride }));
+        const ride = rideFromPayload(payload);
+        if (ride) {
+          dispatch(socketRideUpdated({ ride }));
         }
+        syncMyRides();
       }),
       onRideJoinRejected((payload) => {
-        if (payload?.request?.ride && typeof payload.request.ride === 'object') {
-          dispatch(socketRideUpdated({ ride: payload.request.ride }));
+        const ride = rideFromPayload(payload);
+        if (ride) {
+          dispatch(socketRideUpdated({ ride }));
         }
+        syncMyRides();
+      }),
+      onPassengerVerified((payload) => {
+        const ride = rideFromPayload(payload);
+        if (ride) {
+          dispatch(socketRideUpdated({ ride }));
+        }
+        syncMyRides();
+      }),
+      onRideStarted((payload) => {
+        const ride = rideFromPayload(payload);
+        if (ride) {
+          dispatch(socketRideUpdated({ ride }));
+        }
+        syncMyRides();
+      }),
+      onRideTrackingEnabled((payload) => {
+        const ride = rideFromPayload(payload);
+        if (ride) {
+          dispatch(socketRideUpdated({ ride }));
+        }
+        syncMyRides();
       }),
     ];
 

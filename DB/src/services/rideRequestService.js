@@ -169,10 +169,18 @@ export const rideRequestService = {
     request.startPin = pin;
     request.startPinHash = hashPin(pin);
     request.pinVerified = false;
+    request.verifiedBoarding = false;
+    request.verifiedBoardingAt = null;
     await rideRequestRepository.save(request);
 
-    const populated = await rideRequestRepository.findById(request._id);
-    return sanitizeRequestForUser(populated, userId);
+    const [populated, detailedRide] = await Promise.all([
+      rideRequestRepository.findById(request._id),
+      rideRepository.findDetailedById(ride._id),
+    ]);
+    return {
+      request: sanitizeRequestForUser(populated, userId),
+      ride: detailedRide || null,
+    };
   },
 
   async rejectRequest(requestId, userId) {
@@ -194,8 +202,14 @@ export const rideRequestService = {
     request.rejectedAt = new Date();
     await rideRequestRepository.save(request);
 
-    const populated = await rideRequestRepository.findById(request._id);
-    return sanitizeRequestForUser(populated, userId);
+    const [populated, detailedRide] = await Promise.all([
+      rideRequestRepository.findById(request._id),
+      rideRepository.findDetailedById(ride._id),
+    ]);
+    return {
+      request: sanitizeRequestForUser(populated, userId),
+      ride: detailedRide || null,
+    };
   },
 
   async cancelRequest(requestId, userId) {
@@ -229,8 +243,14 @@ export const rideRequestService = {
     request.cancelledAt = new Date();
     await rideRequestRepository.save(request);
 
-    const populated = await rideRequestRepository.findById(request._id);
-    return sanitizeRequestForUser(populated, userId);
+    const [populated, detailedRide] = await Promise.all([
+      rideRequestRepository.findById(request._id),
+      rideRepository.findDetailedById(ride._id),
+    ]);
+    return {
+      request: sanitizeRequestForUser(populated, userId),
+      ride: detailedRide || null,
+    };
   },
 
   async confirmPickup(requestId, userId, payload = {}) {

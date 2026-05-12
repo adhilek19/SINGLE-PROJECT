@@ -143,6 +143,11 @@ export const onRideJoinAccepted = (handler) =>
   subscribe('ride_join_accepted', handler);
 export const onRideJoinRejected = (handler) =>
   subscribe('ride_join_rejected', handler);
+export const onPassengerVerified = (handler) =>
+  subscribe('passenger_verified', handler);
+export const onRideStarted = (handler) => subscribe('ride_started', handler);
+export const onRideTrackingEnabled = (handler) =>
+  subscribe('ride_tracking_enabled', handler);
 
 export const onIncomingCall = (handler) => subscribe('incoming_call', handler);
 export const onCallAccepted = (handler) => subscribe('call_accepted', handler);

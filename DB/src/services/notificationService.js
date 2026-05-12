@@ -410,6 +410,30 @@ export const notificationService = {
   notifyRideDecision(args) {
     fireAndForget(this.sendRideDecisionPush(args), 'Ride decision');
   },
+
+  async sendRideStartedPush({ rideId, passengerIds = [] }) {
+    const targets = Array.from(new Set((passengerIds || []).map((id) => toId(id)).filter(Boolean)));
+    if (!targets.length) return;
+
+    await Promise.all(
+      targets.map((passengerId) =>
+        this.sendPushToUser(passengerId, {
+          title: 'Ride started',
+          body: 'Your ride is now live. Open ride details for tracking.',
+          url: `/rides/${toId(rideId)}`,
+          tag: `ride-started:${toId(rideId)}`,
+          data: {
+            type: 'ride_started',
+            rideId: toId(rideId),
+          },
+        })
+      )
+    );
+  },
+
+  notifyRideStarted(args) {
+    fireAndForget(this.sendRideStartedPush(args), 'Ride started');
+  },
 };
 
 export default notificationService;

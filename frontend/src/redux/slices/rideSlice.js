@@ -41,8 +41,12 @@ const upsertRide = (rides = [], incomingRide) => {
   if (!incomingRide) return rides;
   const incomingId = toId(incomingRide);
   if (!incomingId) return rides;
+  const existing = rides.find((ride) => toId(ride) === incomingId);
+  const mergedRide = existing
+    ? { ...existing, ...incomingRide }
+    : incomingRide;
   const next = rides.filter((ride) => toId(ride) !== incomingId);
-  next.unshift(incomingRide);
+  next.unshift(mergedRide);
   return sortByDeparture(next);
 };
 
@@ -150,8 +154,12 @@ export const startRideThunk = createAsyncThunk(
   async (payload, { rejectWithValue }) => {
     try {
       const id = typeof payload === 'object' ? payload.id : payload;
-      const startPin = typeof payload === 'object' ? payload.startPin : undefined;
-      const res = await rideService.startRide(id, startPin);
+      const startOptions = typeof payload === 'object'
+        ? {
+            startWithoutPassengers: Boolean(payload.startWithoutPassengers),
+          }
+        : {};
+      const res = await rideService.startRide(id, startOptions);
       return res.data?.data || null;
     } catch (err) {
       return rejectWithValue(err.response?.data?.message || 'Failed to start ride');

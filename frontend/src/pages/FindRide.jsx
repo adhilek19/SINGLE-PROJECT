@@ -182,8 +182,10 @@ const getRideSeatsLeft = (ride) =>
 
 const upsertRideById = (rides = [], ride) => {
   if (!ride?._id) return rides;
+  const existing = rides.find((entry) => String(entry?._id) === String(ride._id));
+  const mergedRide = existing ? { ...existing, ...ride } : ride;
   const next = rides.filter((entry) => String(entry?._id) !== String(ride._id));
-  next.unshift(ride);
+  next.unshift(mergedRide);
   return next;
 };
 

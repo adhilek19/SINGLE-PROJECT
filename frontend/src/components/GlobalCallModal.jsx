@@ -64,7 +64,7 @@ const GlobalCallModal = ({
                 </p>
                 <h2 className="mt-3 text-3xl font-black">{callerName}</h2>
                 <p className="mt-2 text-sm text-emerald-100/80">
-                  Answer from anywhere, like WhatsApp.
+                
                 </p>
 
                 <div className="mt-8 flex w-full items-center justify-center gap-4">

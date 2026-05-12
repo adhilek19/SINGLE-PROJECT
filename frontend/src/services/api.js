@@ -209,7 +209,11 @@ export const rideService = {
 
   deleteRide: (id) => api.delete(`/rides/${id}`),
   updateStatus: (id, status) => api.put(`/rides/${id}/status`, { status }),
-  startRide: (id, startPin) => api.put(`/rides/${id}/start`, { startPin }),
+  startRide: (id, payload = {}) =>
+    api.put(`/rides/${id}/start`, {
+      startWithoutPassengers: Boolean(payload?.startWithoutPassengers),
+    }),
+  verifyPassenger: (rideId, data) => api.post(`/rides/${rideId}/verify-passenger`, data),
   endRide: (id) => api.put(`/rides/${id}/end`),
   completeRide: (id) => api.put(`/rides/${id}/complete`),
   cancelRide: (id, reason) => api.post(`/rides/${id}/cancel`, { reason }),

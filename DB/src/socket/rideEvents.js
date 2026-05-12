@@ -59,38 +59,101 @@ export const emitRideCancelled = (ride) => {
   );
 };
 
-export const emitRideJoinRequested = (request) => {
+const resolveRidePayload = (request, ride) =>
+  (ride && typeof ride === 'object' && !Array.isArray(ride))
+    ? ride
+    : (request?.ride && typeof request.ride === 'object' ? request.ride : null);
+
+export const emitRideJoinRequested = (request, ride = null) => {
   emitToUsers(
     'ride_join_requested',
     [request?.driver, request?.passenger],
     withTimestamp({
       request,
+      ride: resolveRidePayload(request, ride),
       requestId: toId(request?._id),
       rideId: toId(request?.ride),
     })
   );
 };
 
-export const emitRideJoinAccepted = (request) => {
+export const emitRideJoinAccepted = (request, ride = null) => {
   emitToUsers(
     'ride_join_accepted',
     [request?.driver, request?.passenger],
     withTimestamp({
       request,
+      ride: resolveRidePayload(request, ride),
       requestId: toId(request?._id),
       rideId: toId(request?.ride),
     })
   );
 };
 
-export const emitRideJoinRejected = (request) => {
+export const emitRideJoinRejected = (request, ride = null) => {
   emitToUsers(
     'ride_join_rejected',
     [request?.driver, request?.passenger],
     withTimestamp({
       request,
+      ride: resolveRidePayload(request, ride),
       requestId: toId(request?._id),
       rideId: toId(request?.ride),
+    })
+  );
+};
+
+const collectRideAudience = (ride) => {
+  const toUserId = (value) => {
+    if (!value) return '';
+    if (typeof value === 'object' && value._id) return String(value._id);
+    return value.toString?.() || '';
+  };
+
+  const ids = [];
+  const driverId = toUserId(ride?.driver || ride?.driverInfo?._id);
+  if (driverId) ids.push(driverId);
+
+  (ride?.passengers || []).forEach((passenger) => {
+    const passengerId = toUserId(passenger?.user);
+    if (passengerId) ids.push(passengerId);
+  });
+
+  return ids;
+};
+
+export const emitPassengerVerified = ({ request, ride }) => {
+  emitToUsers(
+    'passenger_verified',
+    collectRideAudience(ride),
+    withTimestamp({
+      request,
+      ride,
+      requestId: toId(request?._id),
+      rideId: toId(ride?._id || request?.ride),
+      passengerId: toId(request?.passenger),
+    })
+  );
+};
+
+export const emitRideStarted = (ride) => {
+  emitToUsers(
+    'ride_started',
+    collectRideAudience(ride),
+    withTimestamp({
+      ride,
+      rideId: toId(ride?._id),
+    })
+  );
+};
+
+export const emitRideTrackingEnabled = (ride) => {
+  emitToUsers(
+    'ride_tracking_enabled',
+    collectRideAudience(ride),
+    withTimestamp({
+      ride,
+      rideId: toId(ride?._id),
     })
   );
 };

@@ -2,10 +2,14 @@ import { rideService } from '../services/rideService.js';
 import { rideMatchingService } from '../services/rideMatchingService.js';
 import { successResponse } from '../utils/apiResponse.js';
 import { BadRequest } from '../utils/AppError.js';
+import { notificationService } from '../services/notificationService.js';
 import {
   emitRideCancelled,
   emitRideCreated,
+  emitRideStarted,
+  emitRideTrackingEnabled,
   emitRideUpdated,
+  emitPassengerVerified,
 } from '../socket/rideEvents.js';
 
 const validateIsoDate = (value, fieldName) => {
@@ -72,9 +76,38 @@ export const updateRide = async (req, res, next) => {
 
 export const startRide = async (req, res, next) => {
   try {
-    const ride = await rideService.startRide(req.params.id, req.userId, req.body.startPin || req.body.pin || req.body.tripPin);
+    const ride = await rideService.startRide(req.params.id, req.userId, {
+      startWithoutPassengers: req.body.startWithoutPassengers,
+    });
     emitRideUpdated(ride);
+    emitRideStarted(ride);
+    emitRideTrackingEnabled(ride);
+    notificationService.notifyRideStarted({
+      rideId: ride?._id,
+      passengerIds: (ride?.passengers || [])
+        .map((p) => p?.user?.toString?.() || '')
+        .filter(Boolean),
+    });
     return successResponse(res, 200, 'Ride started successfully', ride);
+  } catch (err) {
+    next(err);
+  }
+};
+
+export const verifyPassenger = async (req, res, next) => {
+  try {
+    const result = await rideService.verifyPassengerBoarding(req.params.id, req.userId, {
+      otp: req.body.otp || req.body.pin || req.body.startPin,
+      requestId: req.body.requestId,
+      passengerId: req.body.passengerId,
+    });
+
+    emitPassengerVerified(result);
+    if (result?.ride) {
+      emitRideUpdated(result.ride);
+    }
+
+    return successResponse(res, 200, 'Passenger boarding verified', result);
   } catch (err) {
     next(err);
   }
@@ -108,6 +141,10 @@ export const updateRideStatus = async (req, res, next) => {
       req.body.status
     );
     emitRideUpdated(ride);
+    if (req.body.status === 'started') {
+      emitRideStarted(ride);
+      emitRideTrackingEnabled(ride);
+    }
 
     return successResponse(res, 200, 'Ride status updated successfully', ride);
   } catch (err) {

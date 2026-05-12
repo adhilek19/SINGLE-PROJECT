@@ -68,6 +68,9 @@ const getPassengerSeatCount = (ride, userId) => {
   return passenger ? Number(passenger.seats || 1) : 0;
 };
 
+const isBoardingVerified = (request) =>
+  Boolean(request?.verifiedBoarding || request?.pinVerified);
+
 export const rideService = {
   async createRide(driverId, data) {
     const {
@@ -207,7 +210,8 @@ export const rideService = {
     return ride;
   },
 
-  async startRide(rideId, driverId, startPin) {
+  async startRide(rideId, driverId, options = {}) {
+    const startWithoutPassengers = Boolean(options?.startWithoutPassengers);
     const ride = await rideRepository.findById(rideId);
     if (!ride) throw NotFound('Ride not found');
 
@@ -222,28 +226,128 @@ export const rideService = {
     ensureRideCanStartNow(ride);
 
     const acceptedRequests = await rideRequestRepository.findAcceptedByRide(rideId);
+    const verifiedRequests = acceptedRequests.filter(isBoardingVerified);
+    const allAcceptedVerified =
+      acceptedRequests.length > 0 &&
+      verifiedRequests.length === acceptedRequests.length;
 
-    if ((ride.passengers || []).length > 0 || acceptedRequests.length > 0) {
-      if (!String(startPin || '').match(/^\d{4}$/)) {
-        throw BadRequest('Passenger 4-digit trip PIN is required to start this ride');
+    if (acceptedRequests.length > 0 && !allAcceptedVerified) {
+      if (!startWithoutPassengers) {
+        throw BadRequest(
+          'Passenger verification pending. Verify all accepted passengers or start ride without passengers.'
+        );
       }
 
-      const matchingRequest = acceptedRequests.find((request) =>
-        rideRequestService.verifyPinValue(startPin, request.startPinHash)
+      if (verifiedRequests.length > 0) {
+        throw BadRequest(
+          'Some passengers are already verified. Verify remaining passengers and use Start Ride.'
+        );
+      }
+
+      const noShowAt = new Date();
+      const acceptedPassengerIds = new Set(
+        acceptedRequests.map((request) => request.passenger?.toString()).filter(Boolean)
+      );
+      const seatsToRelease = acceptedRequests.reduce(
+        (total, request) => total + Math.max(1, Number(request.seatsRequested || 1)),
+        0
       );
 
-      if (!matchingRequest) {
-        throw BadRequest('Invalid trip PIN');
-      }
+      ride.passengers = (ride.passengers || []).filter(
+        (passenger) => !acceptedPassengerIds.has(passenger.user?.toString())
+      );
+      ride.bookedSeats = Math.max(0, Number(ride.bookedSeats || 0) - seatsToRelease);
 
-      matchingRequest.pinVerified = true;
-      await rideRequestRepository.save(matchingRequest);
+      await Promise.all(
+        acceptedRequests.map((request) => {
+          request.status = 'no_show';
+          request.noShowReason = 'Ride started without passengers';
+          request.noShowAt = noShowAt;
+          request.verifiedBoarding = false;
+          request.verifiedBoardingAt = null;
+          request.pinVerified = false;
+          return rideRequestRepository.save(request);
+        })
+      );
     }
 
     ride.status = 'started';
     ride.startTime = new Date();
     await rideRepository.save(ride);
     return ride;
+  },
+
+  async verifyPassengerBoarding(rideId, driverId, { otp, requestId, passengerId } = {}) {
+    const ride = await rideRepository.findById(rideId);
+    if (!ride) throw NotFound('Ride not found');
+
+    if (ride.driver.toString() !== driverId.toString()) {
+      throw Forbidden('Only ride owner can verify passenger boarding');
+    }
+
+    if (ride.status !== 'scheduled') {
+      throw BadRequest('Passenger verification is allowed only before ride starts');
+    }
+
+    const normalizedOtp = String(otp || '').replace(/\D/g, '').slice(0, 4);
+    if (!/^\d{4}$/.test(normalizedOtp)) {
+      throw BadRequest('Valid 4-digit OTP is required');
+    }
+
+    const acceptedRequests = await rideRequestRepository.findAcceptedByRide(rideId);
+    if (!acceptedRequests.length) {
+      throw BadRequest('No accepted passenger found for this ride');
+    }
+
+    let targetRequest = null;
+
+    if (requestId) {
+      targetRequest = acceptedRequests.find(
+        (request) => request._id.toString() === String(requestId)
+      );
+      if (!targetRequest) {
+        throw BadRequest('Selected passenger request is not accepted');
+      }
+      if (!rideRequestService.verifyPinValue(normalizedOtp, targetRequest.startPinHash)) {
+        throw BadRequest('Invalid OTP');
+      }
+    } else if (passengerId) {
+      targetRequest = acceptedRequests.find(
+        (request) => request.passenger?.toString() === String(passengerId)
+      );
+      if (!targetRequest) {
+        throw BadRequest('Selected passenger is not accepted');
+      }
+      if (!rideRequestService.verifyPinValue(normalizedOtp, targetRequest.startPinHash)) {
+        throw BadRequest('Invalid OTP');
+      }
+    } else {
+      targetRequest = acceptedRequests.find((request) =>
+        rideRequestService.verifyPinValue(normalizedOtp, request.startPinHash)
+      );
+      if (!targetRequest) {
+        throw BadRequest('Invalid OTP');
+      }
+    }
+
+    if (isBoardingVerified(targetRequest)) {
+      throw BadRequest('Passenger already verified');
+    }
+
+    targetRequest.verifiedBoarding = true;
+    targetRequest.verifiedBoardingAt = new Date();
+    targetRequest.pinVerified = true;
+    await rideRequestRepository.save(targetRequest);
+
+    const [freshRequest, detailedRide] = await Promise.all([
+      rideRequestRepository.findById(targetRequest._id),
+      rideRepository.findDetailedById(rideId),
+    ]);
+
+    return {
+      request: freshRequest,
+      ride: detailedRide,
+    };
   },
 
   async endRide(rideId, driverId) {

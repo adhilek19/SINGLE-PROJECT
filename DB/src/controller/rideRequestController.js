@@ -60,11 +60,17 @@ export const getMyRideRequests = async (req, res, next) => {
 
 export const acceptRideRequest = async (req, res, next) => {
   try {
-    const request = await rideRequestService.acceptRequest(
+    const result = await rideRequestService.acceptRequest(
       req.params.requestId,
       req.userId
     );
-    emitRideJoinAccepted(request);
+    const request = result?.request || null;
+    const ride = result?.ride || null;
+
+    emitRideJoinAccepted(request, ride);
+    if (ride) {
+      emitRideUpdated(ride);
+    }
     notificationService.notifyRideDecision({
       passengerId: request?.passenger,
       driverId: request?.driver,
@@ -73,7 +79,7 @@ export const acceptRideRequest = async (req, res, next) => {
       requestId: request?._id,
     });
 
-    return successResponse(res, 200, 'Ride request accepted', { request });
+    return successResponse(res, 200, 'Ride request accepted', { request, ride });
   } catch (err) {
     next(err);
   }
@@ -81,11 +87,17 @@ export const acceptRideRequest = async (req, res, next) => {
 
 export const rejectRideRequest = async (req, res, next) => {
   try {
-    const request = await rideRequestService.rejectRequest(
+    const result = await rideRequestService.rejectRequest(
       req.params.requestId,
       req.userId
     );
-    emitRideJoinRejected(request);
+    const request = result?.request || null;
+    const ride = result?.ride || null;
+
+    emitRideJoinRejected(request, ride);
+    if (ride) {
+      emitRideUpdated(ride);
+    }
     notificationService.notifyRideDecision({
       passengerId: request?.passenger,
       driverId: request?.driver,
@@ -94,7 +106,7 @@ export const rejectRideRequest = async (req, res, next) => {
       requestId: request?._id,
     });
 
-    return successResponse(res, 200, 'Ride request rejected', { request });
+    return successResponse(res, 200, 'Ride request rejected', { request, ride });
   } catch (err) {
     next(err);
   }
@@ -102,13 +114,19 @@ export const rejectRideRequest = async (req, res, next) => {
 
 export const cancelRideRequest = async (req, res, next) => {
   try {
-    const request = await rideRequestService.cancelRequest(
+    const result = await rideRequestService.cancelRequest(
       req.params.requestId,
       req.userId
     );
-    emitRideJoinRejected(request);
+    const request = result?.request || null;
+    const ride = result?.ride || null;
 
-    return successResponse(res, 200, 'Ride request cancelled', { request });
+    emitRideJoinRejected(request, ride);
+    if (ride) {
+      emitRideUpdated(ride);
+    }
+
+    return successResponse(res, 200, 'Ride request cancelled', { request, ride });
   } catch (err) {
     next(err);
   }

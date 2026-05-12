@@ -16,7 +16,7 @@ import { callService } from '../services/callService.js';
 import { notificationService } from '../services/notificationService.js';
 
 const RIDE_ROOM_PREFIX = 'ride:';
-const rideRoomName = (rideId) => `${RIDE_ROOM_PREFIX}${rideId}`;
+const trackingRoomName = (rideId) => `${RIDE_ROOM_PREFIX}${rideId}:tracking`;
 
 const normalizeOrigin = (origin = '') => String(origin).trim().replace(/\/+$/, '');
 
@@ -82,6 +82,15 @@ const resolveRideRole = async ({ rideId, user }) => {
   if (accepted) return 'passenger';
 
   return null;
+};
+
+const ensureTrackingEnabled = async (rideId) => {
+  const ride = await Ride.findById(rideId).select('status');
+  if (!ride) return { ok: false, message: 'Ride not found' };
+  if (ride.status !== 'started') {
+    return { ok: false, message: 'Live tracking is available only after ride has started' };
+  }
+  return { ok: true, ride };
 };
 
 const onlineSocketCounts = new Map();
@@ -1064,30 +1073,35 @@ export const initSocket = ({ httpServer }) => {
       }
     });
 
-    socket.on('joinRide', async (payload = {}, ack) => {
+    const joinTracking = async (payload = {}, ack) => {
       try {
         const rideId = String(payload.rideId || '').trim();
         if (!rideId) throw new Error('rideId is required');
 
-        const role = await resolveRideRole({ rideId, user: socket.user });
-        if (!role) throw new Error('Not allowed to join this ride');
+        const tracking = await ensureTrackingEnabled(rideId);
+        if (!tracking.ok) throw new Error(tracking.message);
 
-        await socket.join(rideRoomName(rideId));
+        const role = await resolveRideRole({ rideId, user: socket.user });
+        if (!role) throw new Error('Not allowed to join this ride tracking');
+
+        await socket.join(trackingRoomName(rideId));
         if (typeof ack === 'function') ack({ ok: true, rideId, role });
       } catch (err) {
-        if (typeof ack === 'function') ack({ ok: false, message: err.message || 'joinRide failed' });
+        if (typeof ack === 'function') {
+          ack({ ok: false, message: err.message || 'join tracking failed' });
+        }
       }
-    });
+    };
 
-    socket.on('leaveRide', async (payload = {}, ack) => {
+    const leaveTracking = async (payload = {}, ack) => {
       const rideId = String(payload.rideId || '').trim();
       if (rideId) {
-        await socket.leave(rideRoomName(rideId));
+        await socket.leave(trackingRoomName(rideId));
       }
       if (typeof ack === 'function') ack({ ok: true });
-    });
+    };
 
-    socket.on('location:update', async (payload = {}, ack) => {
+    const locationUpdate = async (payload = {}, ack) => {
       try {
         const rideId = String(payload.rideId || '').trim();
         const lat = Number(payload.lat);
@@ -1110,6 +1124,9 @@ export const initSocket = ({ httpServer }) => {
         if (!validLat(lat) || !validLng(lng)) {
           throw new Error('Valid lat and lng are required');
         }
+
+        const tracking = await ensureTrackingEnabled(rideId);
+        if (!tracking.ok) throw new Error(tracking.message);
 
         const role = await resolveRideRole({ rideId, user: socket.user });
         if (!role) throw new Error('Not allowed to update location for this ride');
@@ -1168,12 +1185,25 @@ export const initSocket = ({ httpServer }) => {
           updatedAt,
         };
 
-        io.to(rideRoomName(rideId)).emit('location:broadcast', broadcast);
+        io.to(trackingRoomName(rideId)).emit('location_broadcast', broadcast);
+        io.to(trackingRoomName(rideId)).emit('location:broadcast', broadcast);
         if (typeof ack === 'function') ack({ ok: true });
       } catch (err) {
-        if (typeof ack === 'function') ack({ ok: false, message: err.message || 'location:update failed' });
+        if (typeof ack === 'function') {
+          ack({ ok: false, message: err.message || 'location update failed' });
+        }
       }
-    });
+    };
+
+    // New tracking contract
+    socket.on('join_tracking', joinTracking);
+    socket.on('leave_tracking', leaveTracking);
+    socket.on('location_update', locationUpdate);
+
+    // Backward-compatible aliases
+    socket.on('joinRide', joinTracking);
+    socket.on('leaveRide', leaveTracking);
+    socket.on('location:update', locationUpdate);
 
     socket.on('disconnect', async () => {
       socket.data.activeChatId = '';

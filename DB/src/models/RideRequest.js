@@ -67,6 +67,11 @@ const rideRequestSchema = new mongoose.Schema(
       type: Boolean,
       default: false,
     },
+    verifiedBoarding: {
+      type: Boolean,
+      default: false,
+    },
+    verifiedBoardingAt: Date,
     noShowReason: {
       type: String,
       trim: true,

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import {
   Calendar,
@@ -20,6 +20,15 @@ import { fetchRideByIdThunk, cancelRideThunk } from '../redux/slices/rideSlice';
 import { createOrGetChat } from '../redux/slices/chatSlice';
 import { authService, getErrorMessage, rideService } from '../services/api';
 import { connectSocket, getSocket } from '../services/socket';
+import {
+  onPassengerVerified,
+  onRideJoinAccepted,
+  onRideJoinRejected,
+  onRideJoinRequested,
+  onRideStarted,
+  onRideTrackingEnabled,
+  onRideUpdated,
+} from '../services/chatSocket';
 import { useLiveLocation } from '../hooks/useLiveLocation';
 
 const getBrowserLocation = () =>
@@ -165,7 +174,7 @@ const RideDetails = () => {
   const [loadError, setLoadError] = useState('');
   const [actionBusy, setActionBusy] = useState(false);
   const [cancelReason, setCancelReason] = useState('');
-  const [startPin, setStartPin] = useState('');
+  const [boardingPinsByRequest, setBoardingPinsByRequest] = useState({});
   const [requestsLoading, setRequestsLoading] = useState(false);
   const [rideRequests, setRideRequests] = useState([]);
   const [requestSeats, setRequestSeats] = useState(1);
@@ -180,6 +189,7 @@ const RideDetails = () => {
   const [reviewForm, setReviewForm] = useState({ target: '', rating: 5, comment: '' });
   const [reviewLoading, setReviewLoading] = useState(false);
   const [nowMs, setNowMs] = useState(() => Date.now());
+  const requestSyncTimerRef = useRef(null);
 
   const uid = toId(user?.id || user?._id);
   const driverId = ride ? toId(ride.driver || ride.driverInfo?._id) : '';
@@ -198,6 +208,14 @@ const RideDetails = () => {
 
   const pendingRequests = useMemo(() => (rideRequests || []).filter((r) => r.status === 'pending'), [rideRequests]);
   const acceptedRequests = useMemo(() => (rideRequests || []).filter((r) => r.status === 'accepted'), [rideRequests]);
+  const verifiedAcceptedRequests = useMemo(
+    () => acceptedRequests.filter((request) => request?.verifiedBoarding || request?.pinVerified),
+    [acceptedRequests]
+  );
+  const pendingVerificationRequests = useMemo(
+    () => acceptedRequests.filter((request) => !(request?.verifiedBoarding || request?.pinVerified)),
+    [acceptedRequests]
+  );
   const liveLocations = useMemo(() => Object.values(liveLocationsByUser || {}), [liveLocationsByUser]);
   const shareUrl = ride?.shareToken ? `${window.location.origin}/track/${ride.shareToken}` : '';
   const rideReviews = ride?.reviewDetails || [];
@@ -244,8 +262,16 @@ const RideDetails = () => {
   const hasPendingRequest = myLatestRequest?.status === 'pending';
   const hasAcceptedRequest = myLatestRequest?.status === 'accepted' || isPassenger;
   const canRequestRide = !isDriver && isRideBookable && !myLatestRequest;
+  const hasAcceptedPassengers = acceptedRequests.length > 0;
+  const allAcceptedVerified =
+    hasAcceptedPassengers &&
+    verifiedAcceptedRequests.length === acceptedRequests.length;
+  const canStartRideNormally =
+    !hasAcceptedPassengers || allAcceptedVerified;
+  const canStartRideWithoutPassengers =
+    hasAcceptedPassengers && verifiedAcceptedRequests.length === 0;
   const startRideDisabled =
-    actionBusy || !canDriverStartByTime || !hasValidDepartureTime;
+    actionBusy || !canDriverStartByTime || !hasValidDepartureTime || !canStartRideNormally;
 
   const alreadyReviewedTarget = (targetId) =>
     rideReviews.some((review) => toId(review.reviewer) === uid && toId(review.reviewee) === String(targetId));
@@ -286,6 +312,17 @@ const RideDetails = () => {
     }
   };
 
+  const syncRideAndRequestsSoon = (delayMs = 120) => {
+    if (!token || !id) return;
+    if (requestSyncTimerRef.current) {
+      window.clearTimeout(requestSyncTimerRef.current);
+    }
+    requestSyncTimerRef.current = window.setTimeout(() => {
+      requestSyncTimerRef.current = null;
+      void Promise.all([refreshRide(), refreshRequests()]);
+    }, delayMs);
+  };
+
   useEffect(() => {
     const fetchRide = async () => {
       try {
@@ -311,6 +348,62 @@ const RideDetails = () => {
     return () => window.clearTimeout(timer);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [ride?._id, token]);
+
+  useEffect(
+    () => () => {
+      if (requestSyncTimerRef.current) {
+        window.clearTimeout(requestSyncTimerRef.current);
+        requestSyncTimerRef.current = null;
+      }
+    },
+    []
+  );
+
+  useEffect(() => {
+    if (!token || !id) return undefined;
+
+    const shouldSync = (payload = {}) => {
+      const payloadRideId =
+        String(payload?.rideId || payload?.ride?._id || payload?.request?.ride?._id || payload?.request?.ride || '').trim();
+      return payloadRideId === String(id);
+    };
+
+    const unsubscribers = [
+      onRideUpdated((payload) => {
+        if (!shouldSync(payload)) return;
+        syncRideAndRequestsSoon(40);
+      }),
+      onRideJoinRequested((payload) => {
+        if (!shouldSync(payload)) return;
+        syncRideAndRequestsSoon(40);
+      }),
+      onRideJoinAccepted((payload) => {
+        if (!shouldSync(payload)) return;
+        syncRideAndRequestsSoon(40);
+      }),
+      onRideJoinRejected((payload) => {
+        if (!shouldSync(payload)) return;
+        syncRideAndRequestsSoon(40);
+      }),
+      onPassengerVerified((payload) => {
+        if (!shouldSync(payload)) return;
+        syncRideAndRequestsSoon(20);
+      }),
+      onRideStarted((payload) => {
+        if (!shouldSync(payload)) return;
+        syncRideAndRequestsSoon(20);
+      }),
+      onRideTrackingEnabled((payload) => {
+        if (!shouldSync(payload)) return;
+        syncRideAndRequestsSoon(20);
+      }),
+    ];
+
+    return () => {
+      unsubscribers.forEach((unsubscribe) => unsubscribe?.());
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [token, id]);
 
   useEffect(() => {
     if (!Array.isArray(ride?.lastLiveLocations)) return;
@@ -338,12 +431,12 @@ const RideDetails = () => {
   const canTrackLive = Boolean(
     token &&
     ride?._id &&
-    ['started', 'ended'].includes(ride?.status) &&
+    ride?.status === 'started' &&
     (isDriver || isPassenger || myLatestRequest?.status === 'accepted')
   );
 
   useEffect(() => {
-    if (!token || !ride?._id) return undefined;
+    if (!token || !ride?._id || !canTrackLive) return undefined;
     const socket = connectSocket();
     const stateTimer = window.setTimeout(() => {
       setSocketState(socket.connected ? 'connected' : 'connecting');
@@ -360,17 +453,19 @@ const RideDetails = () => {
     socket.on('connect', onConnect);
     socket.on('disconnect', onDisconnect);
     socket.on('connect_error', onConnectError);
+    socket.on('location_broadcast', onBroadcast);
     socket.on('location:broadcast', onBroadcast);
-    socket.emit('joinRide', { rideId: ride._id });
+    socket.emit('join_tracking', { rideId: ride._id });
     return () => {
       window.clearTimeout(stateTimer);
-      socket.emit('leaveRide', { rideId: ride._id });
+      socket.emit('leave_tracking', { rideId: ride._id });
       socket.off('connect', onConnect);
       socket.off('disconnect', onDisconnect);
       socket.off('connect_error', onConnectError);
+      socket.off('location_broadcast', onBroadcast);
       socket.off('location:broadcast', onBroadcast);
     };
-  }, [ride?._id, token]);
+  }, [canTrackLive, ride?._id, token]);
 
   useLiveLocation({
     socket: canTrackLive ? getSocket() : null,
@@ -501,6 +596,29 @@ const RideDetails = () => {
     }
   };
 
+  const handleVerifyPassenger = async (requestId) => {
+    const otp = String(boardingPinsByRequest[requestId] || '')
+      .replace(/\D/g, '')
+      .slice(0, 4);
+
+    if (!/^\d{4}$/.test(otp)) {
+      toast.error('Enter valid 4-digit boarding OTP');
+      return;
+    }
+
+    setReqBusy(`verify-${requestId}`, true);
+    try {
+      await rideService.verifyPassenger(id, { requestId, otp });
+      toast.success('Passenger verified');
+      setBoardingPinsByRequest((prev) => ({ ...prev, [requestId]: '' }));
+      await Promise.all([refreshRide(), refreshRequests()]);
+    } catch (e) {
+      toast.error(e?.response?.data?.message || 'Failed to verify passenger');
+    } finally {
+      setReqBusy(`verify-${requestId}`, false);
+    }
+  };
+
   const handleStart = async () => {
     if (!hasValidDepartureTime) {
       toast.error('Ride has invalid scheduled departure time.');
@@ -510,19 +628,40 @@ const RideDetails = () => {
       toast.error(`Ride can be started at or after ${scheduledStartLabel}.`);
       return;
     }
-    if ((ride?.passengers?.length || acceptedRequests.length) && !/^\d{4}$/.test(startPin)) {
-      toast.error('Enter passenger 4-digit PIN before starting ride');
+    if (!canStartRideNormally) {
+      toast.error('Passenger verification pending');
       return;
     }
     setActionBusy(true);
     try {
-      await rideService.startRide(id, startPin);
-      toast.success('Ride started after PIN verification');
-      setStartPin('');
+      await rideService.startRide(id);
+      toast.success('Ride started');
       await refreshRide();
       await refreshRequests();
     } catch (e) {
       toast.error(e?.response?.data?.message || 'Failed to start ride');
+    } finally {
+      setActionBusy(false);
+    }
+  };
+
+  const handleStartWithoutPassengers = async () => {
+    if (!canStartRideWithoutPassengers) {
+      toast.error('This action is available only when no accepted passenger is verified');
+      return;
+    }
+
+    const confirmed = window.confirm('Start ride without passengers?');
+    if (!confirmed) return;
+
+    setActionBusy(true);
+    try {
+      await rideService.startRide(id, { startWithoutPassengers: true });
+      toast.success('Ride started without passengers');
+      await refreshRide();
+      await refreshRequests();
+    } catch (e) {
+      toast.error(e?.response?.data?.message || 'Failed to start ride without passengers');
     } finally {
       setActionBusy(false);
     }
@@ -794,6 +933,16 @@ const RideDetails = () => {
           <RouteMap source={ride.source} destination={ride.destination} liveLocations={liveLocations} />
         </div>
 
+        {ride?.status === 'scheduled' ? (
+          <div className="rounded-2xl border border-blue-200 bg-blue-50 p-4 text-sm font-semibold text-blue-800">
+            {isDriver
+              ? pendingVerificationRequests.length
+                ? 'Passenger verification pending. Verify accepted passengers before starting ride, or use Start Ride Without Passengers.'
+                : 'Waiting for driver to start ride.'
+              : 'Waiting for driver to start ride.'}
+          </div>
+        ) : null}
+
         {canTrackLive && (
           <div className="space-y-4 rounded-2xl border border-emerald-200 bg-emerald-50 p-4">
             <div>
@@ -837,14 +986,29 @@ const RideDetails = () => {
             <h3 className="font-black">Driver Controls</h3>
             {isScheduled && (
               <div className="max-w-md rounded-2xl border bg-slate-50 p-4 space-y-3">
-                <p className="text-sm font-semibold">Passenger 4-digit Trip PIN required before ride start.</p>
+                <p className="text-sm font-semibold">
+                  Start Ride is enabled when no accepted passengers exist, or all accepted passengers are verified.
+                </p>
                 {!canDriverStartByTime ? (
                   <p className="rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs font-bold text-amber-800">
                     Start is locked until {scheduledStartLabel}.
                   </p>
                 ) : null}
-                <input value={startPin} onChange={(e) => setStartPin(e.target.value.replace(/\D/g, '').slice(0, 4))} className="w-full rounded-xl border p-3 text-center text-2xl font-black tracking-[0.5em]" placeholder="4821" />
-                <button onClick={handleStart} disabled={startRideDisabled} className="w-full rounded-xl bg-emerald-600 px-4 py-3 font-bold text-white disabled:opacity-60">Verify PIN & Start Ride</button>
+                {pendingVerificationRequests.length ? (
+                  <p className="rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs font-bold text-amber-800">
+                    Passenger verification pending: {pendingVerificationRequests.length}
+                  </p>
+                ) : null}
+                <button onClick={handleStart} disabled={startRideDisabled} className="w-full rounded-xl bg-emerald-600 px-4 py-3 font-bold text-white disabled:opacity-60">Start Ride</button>
+                {canStartRideWithoutPassengers ? (
+                  <button
+                    onClick={handleStartWithoutPassengers}
+                    disabled={actionBusy || !canDriverStartByTime || !hasValidDepartureTime}
+                    className="w-full rounded-xl bg-amber-600 px-4 py-3 font-bold text-white disabled:opacity-60"
+                  >
+                    Start Ride Without Passengers
+                  </button>
+                ) : null}
               </div>
             )}
             {isStarted && <button onClick={handleEnd} disabled={actionBusy} className="rounded-xl bg-indigo-600 px-4 py-3 font-bold text-white disabled:opacity-60">End Ride</button>}
@@ -868,6 +1032,9 @@ const RideDetails = () => {
                   <div className="rounded-2xl border border-emerald-300 bg-emerald-50 p-4 text-center">
                     <p className="text-sm font-bold text-emerald-800">Show this 4-digit PIN to driver before ride start</p>
                     <p className="mt-2 text-4xl font-black tracking-[0.4em] text-emerald-700">{myLatestRequest.startPin}</p>
+                    <p className="mt-2 text-xs font-bold text-slate-600">
+                      Boarding status: {myLatestRequest.verifiedBoarding || myLatestRequest.pinVerified ? 'Verified' : 'Pending Verification'}
+                    </p>
                   </div>
                 ) : null}
                 {myLatestRequest.pickupLocation?.lat ? <p className="text-sm flex items-center gap-1"><MapPin className="w-4 h-4" /> Pickup GPS confirmed</p> : null}
@@ -937,11 +1104,35 @@ const RideDetails = () => {
               <div className="space-y-2">
                 <h4 className="font-bold">Accepted Passengers</h4>
                 {acceptedRequests.map((req) => (
-                  <div key={req._id} className="flex flex-wrap items-center justify-between gap-2 rounded-xl border p-3 text-sm">
-                    <span>
+                  <div key={req._id} className="space-y-2 rounded-xl border p-3 text-sm">
+                    <span className="block">
                       <ProfileLink user={req.passenger} fallback="Passenger" />
-                      {' '}· seats {req.seatsRequested} · PIN verified: {req.pinVerified ? 'Yes ✅' : 'No'}
+                      {' '}· seats {req.seatsRequested} · {req.verifiedBoarding || req.pinVerified ? 'Verified ✅' : 'Pending Verification'}
                     </span>
+
+                    {!(req.verifiedBoarding || req.pinVerified) ? (
+                      <div className="flex flex-wrap gap-2">
+                        <input
+                          value={boardingPinsByRequest[req._id] || ''}
+                          onChange={(e) =>
+                            setBoardingPinsByRequest((prev) => ({
+                              ...prev,
+                              [req._id]: e.target.value.replace(/\D/g, '').slice(0, 4),
+                            }))
+                          }
+                          className="w-32 rounded-lg border p-2 text-center font-black tracking-[0.35em]"
+                          placeholder="4821"
+                        />
+                        <button
+                          onClick={() => handleVerifyPassenger(req._id)}
+                          disabled={Boolean(requestActionLoading[`verify-${req._id}`])}
+                          className="rounded-lg bg-blue-600 px-3 py-1 font-bold text-white disabled:opacity-60"
+                        >
+                          {requestActionLoading[`verify-${req._id}`] ? 'Verifying...' : 'Verify Passenger'}
+                        </button>
+                      </div>
+                    ) : null}
+
                     <div className="flex flex-wrap gap-2">
                       <button onClick={() => handleOpenChat(toId(req.passenger))} className="rounded-lg bg-emerald-600 px-3 py-1 font-bold text-white">Message Passenger</button>
                       <button onClick={() => handleMarkNoShow(req._id)} className="rounded-lg bg-amber-600 px-3 py-1 font-bold text-white">Mark no-show</button>
