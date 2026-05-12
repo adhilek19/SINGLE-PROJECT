@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { useParams } from 'react-router-dom';
 import { Calendar, Clock, IndianRupee, MapPin, ShieldCheck, Car } from 'lucide-react';
+import { io } from 'socket.io-client';
 import RouteMap from '../components/RouteMap';
 import { rideService } from '../services/api';
 
@@ -23,20 +24,53 @@ const formatSpeedKmh = (loc = {}) => {
   return `${Math.round(speed)} km/h`;
 };
 
+const toLocKey = (loc = {}) =>
+  String(loc.userId || loc.user?._id || loc.user || `${loc.role || 'passenger'}:${loc.name || ''}`);
+
+const upsertLiveLocation = (locations = [], update = {}) => {
+  const map = new Map((locations || []).map((loc) => [toLocKey(loc), loc]));
+  map.set(toLocKey(update), {
+    ...update,
+    user: update.user || update.userId || update.user?._id || '',
+  });
+
+  return Array.from(map.values())
+    .sort(
+      (a, b) =>
+        new Date(b?.updatedAt || b?.at || 0).getTime() -
+        new Date(a?.updatedAt || a?.at || 0).getTime()
+    )
+    .slice(0, 10);
+};
+
+const API_URL =
+  import.meta.env.VITE_API_URL ||
+  (import.meta.env.DEV
+    ? 'http://localhost:5000/api'
+    : 'https://sahayatri-p95g.onrender.com/api');
+const SOCKET_URL = API_URL.replace(/\/api\/?$/, '');
+
 const TrackRide = () => {
   const { token } = useParams();
   const [ride, setRide] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+  const [socketConnected, setSocketConnected] = useState(false);
 
   useEffect(() => {
     let mounted = true;
+    let publicSocket = null;
+    let lastRealtimeAt = 0;
+    let isSocketConnected = false;
+    let joinedRideId = '';
 
     const load = async ({ silent = false } = {}) => {
       try {
         const res = await rideService.getPublicTracking(token);
         if (!mounted) return;
-        setRide(res.data?.data?.ride || null);
+        const nextRide = res.data?.data?.ride || null;
+        setRide(nextRide);
+        joinedRideId = String(nextRide?._id || joinedRideId || '').trim();
         setError('');
       } catch (err) {
         if (!mounted) return;
@@ -46,12 +80,85 @@ const TrackRide = () => {
       }
     };
 
+    const applySocketUpdate = (payload = {}) => {
+      if (!mounted || !payload?.rideId) return;
+      setRide((prev) => {
+        if (!prev || String(prev?._id) !== String(payload.rideId)) return prev;
+        const nextLocations = upsertLiveLocation(prev.lastLiveLocations || [], payload);
+        return {
+          ...prev,
+          status: payload.status || prev.status,
+          lastLiveLocations: nextLocations,
+        };
+      });
+    };
+
+    const setupRealtime = () => {
+      publicSocket = io(`${SOCKET_URL}/public-tracking`, {
+        transports: ['websocket'],
+        withCredentials: true,
+      });
+
+      publicSocket.on('connect', () => {
+        publicSocket.emit('join_public_tracking', { token }, (ack = {}) => {
+          if (!mounted) return;
+          const ok = Boolean(ack?.ok);
+          isSocketConnected = ok;
+          setSocketConnected(ok);
+          if (ok) {
+            joinedRideId = String(ack?.rideId || joinedRideId || '').trim();
+          }
+        });
+      });
+
+      publicSocket.on('disconnect', () => {
+        if (!mounted) return;
+        isSocketConnected = false;
+        setSocketConnected(false);
+      });
+
+      publicSocket.on('public_tracking_snapshot', (payload = {}) => {
+        if (!mounted || !payload?.rideId) return;
+        setRide((prev) => {
+          if (!prev || String(prev?._id) !== String(payload.rideId)) return prev;
+          return {
+            ...prev,
+            status: payload.status || prev.status,
+            lastLiveLocations: payload.lastLiveLocations || prev.lastLiveLocations || [],
+          };
+        });
+        lastRealtimeAt = Date.now();
+        isSocketConnected = true;
+        setSocketConnected(true);
+      });
+
+      publicSocket.on('public_tracking_update', (payload = {}) => {
+        applySocketUpdate(payload);
+        lastRealtimeAt = Date.now();
+        isSocketConnected = true;
+        setSocketConnected(true);
+      });
+    };
+
     load();
-    const intervalId = window.setInterval(() => load({ silent: true }), 5000);
+    setupRealtime();
+
+    const intervalId = window.setInterval(() => {
+      const realtimeStale = Date.now() - lastRealtimeAt > 15000;
+      if (!isSocketConnected || realtimeStale) {
+        load({ silent: true });
+      }
+    }, 5000);
 
     return () => {
       mounted = false;
       window.clearInterval(intervalId);
+      if (publicSocket) {
+        if (joinedRideId) {
+          publicSocket.emit('leave_public_tracking', { rideId: joinedRideId });
+        }
+        publicSocket.disconnect();
+      }
     };
   }, [token]);
 
@@ -68,6 +175,9 @@ const TrackRide = () => {
           <div>
             <h1 className="text-2xl font-black">SahaYatri Public Ride Tracking</h1>
             <p className="text-sm text-slate-500">Family/friends can see driver, vehicle, route, ETA and last live location.</p>
+            <p className="text-xs text-slate-500 mt-1">
+              {socketConnected ? 'Realtime tracking connected' : 'Realtime unavailable, using auto-refresh fallback'}
+            </p>
           </div>
           <span className="rounded-full bg-blue-100 px-4 py-2 text-sm font-black uppercase text-blue-700">{ride.status}</span>
         </div>

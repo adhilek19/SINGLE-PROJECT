@@ -17,6 +17,7 @@ import { notificationService } from '../services/notificationService.js';
 
 const RIDE_ROOM_PREFIX = 'ride:';
 const trackingRoomName = (rideId) => `${RIDE_ROOM_PREFIX}${rideId}:tracking`;
+const publicTrackingRoomName = (rideId) => `public:${RIDE_ROOM_PREFIX}${rideId}:tracking`;
 
 const normalizeOrigin = (origin = '') => String(origin).trim().replace(/\/+$/, '');
 
@@ -141,6 +142,56 @@ export const initSocket = ({ httpServer }) => {
   });
 
   setSocketIO(io);
+  const publicTrackingNamespace = io.of('/public-tracking');
+
+  publicTrackingNamespace.on('connection', (socket) => {
+    socket.on('join_public_tracking', async (payload = {}, ack) => {
+      try {
+        const shareToken = String(payload.token || '').trim();
+        if (!shareToken) throw new Error('Tracking token is required');
+
+        const ride = await Ride.findOne({
+          shareToken,
+          shareEnabled: true,
+        }).select('_id status lastLiveLocations');
+
+        if (!ride) throw new Error('Tracking link is invalid or disabled');
+
+        const rideId = ride._id.toString();
+        socket.join(publicTrackingRoomName(rideId));
+
+        socket.emit('public_tracking_snapshot', {
+          rideId,
+          status: ride.status,
+          lastLiveLocations: ride.lastLiveLocations || [],
+          at: new Date().toISOString(),
+        });
+
+        if (typeof ack === 'function') {
+          ack({
+            ok: true,
+            rideId,
+            status: ride.status,
+          });
+        }
+      } catch (err) {
+        if (typeof ack === 'function') {
+          ack({
+            ok: false,
+            message: err.message || 'Unable to join tracking channel',
+          });
+        }
+      }
+    });
+
+    socket.on('leave_public_tracking', (payload = {}, ack) => {
+      const rideId = String(payload.rideId || '').trim();
+      if (rideId) {
+        socket.leave(publicTrackingRoomName(rideId));
+      }
+      if (typeof ack === 'function') ack({ ok: true });
+    });
+  });
 
   const callSessions = new Map();
   const userCallLocks = new Map();
@@ -1187,6 +1238,13 @@ export const initSocket = ({ httpServer }) => {
 
         io.to(trackingRoomName(rideId)).emit('location_broadcast', broadcast);
         io.to(trackingRoomName(rideId)).emit('location:broadcast', broadcast);
+        publicTrackingNamespace
+          .to(publicTrackingRoomName(rideId))
+          .emit('public_tracking_update', {
+            ...broadcast,
+            status: tracking.ride?.status || 'started',
+            at: new Date().toISOString(),
+          });
         if (typeof ack === 'function') ack({ ok: true });
       } catch (err) {
         if (typeof ack === 'function') {
