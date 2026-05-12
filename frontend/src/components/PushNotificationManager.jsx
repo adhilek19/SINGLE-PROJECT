@@ -12,6 +12,7 @@ import {
 
 const toId = (value) =>
   (value && typeof value === 'object' ? value._id : value)?.toString?.() || '';
+const isDev = import.meta.env.DEV;
 
 const PushNotificationManager = () => {
   const token = useSelector((state) => state.auth.token);
@@ -22,10 +23,18 @@ const PushNotificationManager = () => {
   useEffect(() => {
     if (!token || !userId) return;
 
-    registerServiceWorker().catch(() => {});
+    registerServiceWorker().catch((err) => {
+      if (isDev) {
+        console.error('[push][frontend] initial service worker registration failed', err);
+      }
+    });
 
     if (getNotificationPermission() === 'granted') {
-      subscribeToPush().catch(() => {});
+      subscribeToPush().catch((err) => {
+        if (isDev) {
+          console.error('[push][frontend] auto subscribe failed', err);
+        }
+      });
       return;
     }
 
@@ -48,13 +57,20 @@ const PushNotificationManager = () => {
               type="button"
               onClick={async () => {
                 toast.dismiss(t.id);
-                const permission = await requestNotificationPermission();
-                if (permission !== 'granted') {
-                  toast.error('Notifications were not enabled.');
-                  return;
+                try {
+                  const permission = await requestNotificationPermission();
+                  if (permission !== 'granted') {
+                    toast.error('Notifications were not enabled.');
+                    return;
+                  }
+                  await subscribeToPush();
+                  toast.success('Push notifications enabled.');
+                } catch (err) {
+                  if (isDev) {
+                    console.error('[push][frontend] prompt subscribe failed', err);
+                  }
+                  toast.error('Failed to enable notifications.');
                 }
-                await subscribeToPush();
-                toast.success('Push notifications enabled.');
               }}
               className="rounded-lg bg-blue-600 px-3 py-2 text-sm font-bold text-white"
             >

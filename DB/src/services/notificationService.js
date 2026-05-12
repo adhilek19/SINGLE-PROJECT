@@ -15,6 +15,7 @@ webPush.setVapidDetails(
 const MAX_TITLE_LENGTH = 90;
 const MAX_BODY_LENGTH = 180;
 const isDev = env.NODE_ENV !== 'production';
+const endpointPrefix = (endpoint = '') => cleanText(endpoint, 2048).slice(0, 120);
 
 const debugPushLog = (message, meta = {}) => {
   if (!isDev) return;
@@ -122,6 +123,11 @@ const isUserFocusedInChat = async ({ userId, chatId }) => {
 
 const fireAndForget = (promise, label) => {
   Promise.resolve(promise).catch((err) => {
+    debugPushLog('push error', {
+      reason: 'dispatch_failed',
+      label,
+      error: err?.message || 'unknown_error',
+    });
     logger.warn(`${label} push failed: ${err.message}`);
   });
 };
@@ -182,15 +188,28 @@ export const notificationService = {
     const safeEndpoint = cleanText(endpoint, 2048);
     if (!safeEndpoint) return { deletedCount: 0 };
 
-    return PushSubscription.deleteMany({
+    const result = await PushSubscription.deleteMany({
       user: userId,
       endpoint: safeEndpoint,
     });
+    debugPushLog('subscription removed', {
+      userId: toId(userId),
+      endpoint: endpointPrefix(safeEndpoint),
+      deletedCount: Number(result?.deletedCount || 0),
+    });
+    return result;
   },
 
   async sendPushToUser(userId, payload) {
     const safeUserId = toId(userId);
-    if (!safeUserId) return { sent: 0, removed: 0 };
+    if (!safeUserId) {
+      debugPushLog('push skipped', {
+        userId: '',
+        reason: 'invalid_user_id',
+        type: payload?.data?.type || payload?.tag || 'unknown',
+      });
+      return { sent: 0, removed: 0 };
+    }
 
     const subscriptions = await PushSubscription.find({ user: safeUserId });
     if (!subscriptions.length) {
@@ -208,6 +227,7 @@ export const notificationService = {
 
     debugPushLog('push attempted', {
       userId: safeUserId,
+      reason: 'dispatch_started',
       subscriptions: subscriptions.length,
       type: payload?.data?.type || payload?.tag || 'unknown',
       url: payload?.url || '/',
@@ -228,6 +248,7 @@ export const notificationService = {
           sent += 1;
           debugPushLog('push sent', {
             userId: safeUserId,
+            reason: 'delivered',
             endpoint: subscription.endpoint.slice(0, 120),
             type: payload?.data?.type || payload?.tag || 'unknown',
           });
@@ -246,6 +267,14 @@ export const notificationService = {
           }
 
           logger.warn(`Web push delivery failed: ${err.message}`);
+          debugPushLog('push error', {
+            userId: safeUserId,
+            reason: 'send_failed',
+            statusCode: Number(err?.statusCode || err?.status || 0),
+            endpoint: endpointPrefix(subscription.endpoint),
+            type: payload?.data?.type || payload?.tag || 'unknown',
+            error: err?.message || 'unknown_error',
+          });
         }
       })
     );
@@ -257,6 +286,7 @@ export const notificationService = {
     if (!receiverId || toId(receiverId) === toId(senderId)) {
       debugPushLog('push skipped', {
         reason: 'sender_is_receiver',
+        userId: toId(receiverId) || toId(senderId),
         type: 'chat_message',
         chatId: toId(chatId),
       });
@@ -294,6 +324,7 @@ export const notificationService = {
     if (!calleeId || toId(calleeId) === toId(callerId)) {
       debugPushLog('push skipped', {
         reason: 'sender_is_receiver',
+        userId: toId(calleeId) || toId(callerId),
         type: 'incoming_call',
         chatId: toId(chatId),
         callId: toId(callId),
@@ -333,6 +364,7 @@ export const notificationService = {
     if (!calleeId || toId(calleeId) === toId(callerId)) {
       debugPushLog('push skipped', {
         reason: 'sender_is_receiver',
+        userId: toId(calleeId) || toId(callerId),
         type: 'missed_call',
         chatId: toId(chatId),
         callId: toId(callId),
@@ -369,7 +401,16 @@ export const notificationService = {
   },
 
   async sendRideRequestPush({ driverId, passengerId, passengerName, rideId, requestId }) {
-    if (!driverId || toId(driverId) === toId(passengerId)) return;
+    if (!driverId || toId(driverId) === toId(passengerId)) {
+      debugPushLog('push skipped', {
+        reason: 'invalid_receiver_or_sender_is_receiver',
+        userId: toId(driverId) || toId(passengerId),
+        type: 'ride_join_request',
+        rideId: toId(rideId),
+        requestId: toId(requestId),
+      });
+      return;
+    }
 
     await this.sendPushToUser(driverId, {
       title: 'New ride join request',
@@ -389,7 +430,16 @@ export const notificationService = {
   },
 
   async sendRideDecisionPush({ passengerId, driverId, status, rideId, requestId }) {
-    if (!passengerId || toId(passengerId) === toId(driverId)) return;
+    if (!passengerId || toId(passengerId) === toId(driverId)) {
+      debugPushLog('push skipped', {
+        reason: 'invalid_receiver_or_sender_is_receiver',
+        userId: toId(passengerId) || toId(driverId),
+        type: status === 'accepted' ? 'ride_request_accepted' : 'ride_request_rejected',
+        rideId: toId(rideId),
+        requestId: toId(requestId),
+      });
+      return;
+    }
     const accepted = status === 'accepted';
 
     await this.sendPushToUser(passengerId, {
@@ -413,7 +463,15 @@ export const notificationService = {
 
   async sendRideStartedPush({ rideId, passengerIds = [] }) {
     const targets = Array.from(new Set((passengerIds || []).map((id) => toId(id)).filter(Boolean)));
-    if (!targets.length) return;
+    if (!targets.length) {
+      debugPushLog('push skipped', {
+        reason: 'no_receivers',
+        userId: '',
+        type: 'ride_started',
+        rideId: toId(rideId),
+      });
+      return;
+    }
 
     await Promise.all(
       targets.map((passengerId) =>
@@ -437,7 +495,16 @@ export const notificationService = {
 
   async sendPassengerVerifiedPush({ passengerId, rideId, requestId }) {
     const safePassengerId = toId(passengerId);
-    if (!safePassengerId) return;
+    if (!safePassengerId) {
+      debugPushLog('push skipped', {
+        reason: 'invalid_user_id',
+        userId: '',
+        type: 'passenger_verified',
+        rideId: toId(rideId),
+        requestId: toId(requestId),
+      });
+      return;
+    }
 
     await this.sendPushToUser(safePassengerId, {
       title: 'Boarding verified',
@@ -460,7 +527,15 @@ export const notificationService = {
     const targets = Array.from(
       new Set((passengerIds || []).map((id) => toId(id)).filter(Boolean))
     );
-    if (!targets.length) return;
+    if (!targets.length) {
+      debugPushLog('push skipped', {
+        reason: 'no_receivers',
+        userId: '',
+        type: 'ride_tracking_enabled',
+        rideId: toId(rideId),
+      });
+      return;
+    }
 
     await Promise.all(
       targets.map((passengerId) =>

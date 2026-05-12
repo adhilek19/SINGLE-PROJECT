@@ -1,4 +1,13 @@
 const DEFAULT_URL = '/';
+const SW_DEBUG_HOSTS = new Set(['localhost', '127.0.0.1']);
+const swDebug = (message, meta) => {
+  if (!SW_DEBUG_HOSTS.has(self.location.hostname)) return;
+  if (meta !== undefined) {
+    console.info(`[push][sw] ${message}`, meta);
+    return;
+  }
+  console.info(`[push][sw] ${message}`);
+};
 
 const safeUrl = (value) => {
   try {
@@ -27,6 +36,12 @@ self.addEventListener('push', (event) => {
     payload = {};
   }
 
+  swDebug('push event received', {
+    hasData: Boolean(event.data),
+    tag: payload?.tag || '',
+    type: payload?.data?.type || '',
+  });
+
   const url = safeUrl(payload.url);
   const title = String(payload.title || 'SahaYatri').slice(0, 90);
   const tag = String(payload.tag || url || 'sahayatri').slice(0, 128);
@@ -48,6 +63,11 @@ self.addEventListener('push', (event) => {
       const existing = await self.registration.getNotifications({ tag });
       existing.forEach((notification) => notification.close());
       await self.registration.showNotification(title, options);
+      swDebug('showNotification called', {
+        title,
+        tag,
+        url,
+      });
     })()
   );
 });
