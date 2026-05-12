@@ -663,8 +663,12 @@ export const rideRepository = {
     return Ride.create(data);
   },
 
-  findById(id) {
-    return Ride.findById(id);
+  findById(id, options = {}) {
+    const query = Ride.findById(id);
+    if (options.session) {
+      query.session(options.session);
+    }
+    return query;
   },
 
   findDetailedById(id) {
@@ -677,7 +681,10 @@ export const rideRepository = {
       .select('driver source destination departureTime estimatedEndTime duration price vehicle status shareToken preferences lastLiveLocations anomalyFlags seatsAvailable bookedSeats createdAt');
   },
 
-  save(ride) {
+  save(ride, options = {}) {
+    if (options.session) {
+      return ride.save({ session: options.session });
+    }
     return ride.save();
   },
 

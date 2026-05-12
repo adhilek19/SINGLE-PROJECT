@@ -1,5 +1,6 @@
 import { getSocketIO } from './socketEmitter.js';
 import { toId, userRoomName } from '../services/chatAccessService.js';
+import { rideRepository } from '../repositories/rideRepository.js';
 
 const emitGlobal = (event, payload) => {
   const io = getSocketIO();
@@ -39,12 +40,35 @@ export const emitRideCreated = (ride) => {
   );
 };
 
-export const emitRideUpdated = (ride) => {
+const resolveRideId = (ride) => {
+  if (!ride) return '';
+  if (typeof ride === 'string') return String(ride);
+  if (typeof ride === 'object') {
+    if (ride._id) return toId(ride._id);
+    if (ride.rideId) return toId(ride.rideId);
+  }
+  return '';
+};
+
+export const emitRideUpdated = async (ride) => {
+  const rideId = resolveRideId(ride);
+  let payloadRide =
+    ride && typeof ride === 'object' && !Array.isArray(ride) ? ride : null;
+
+  if (rideId) {
+    try {
+      const canonicalRide = await rideRepository.findDetailedById(rideId);
+      if (canonicalRide) payloadRide = canonicalRide;
+    } catch {
+      // Fall back to non-canonical payload to avoid dropping realtime update.
+    }
+  }
+
   emitGlobal(
     'ride_updated',
     withTimestamp({
-      ride,
-      rideId: toId(ride?._id),
+      ride: payloadRide,
+      rideId: toId(payloadRide?._id || rideId),
     })
   );
 };

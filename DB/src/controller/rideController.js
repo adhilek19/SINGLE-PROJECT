@@ -64,7 +64,7 @@ export const updateRide = async (req, res, next) => {
       req.userId,
       updates
     );
-    emitRideUpdated(ride);
+    await emitRideUpdated(ride);
 
     return successResponse(res, 200, 'Ride updated successfully', ride);
   } catch (err) {
@@ -79,10 +79,16 @@ export const startRide = async (req, res, next) => {
     const ride = await rideService.startRide(req.params.id, req.userId, {
       startWithoutPassengers: req.body.startWithoutPassengers,
     });
-    emitRideUpdated(ride);
+    await emitRideUpdated(ride);
     emitRideStarted(ride);
     emitRideTrackingEnabled(ride);
     notificationService.notifyRideStarted({
+      rideId: ride?._id,
+      passengerIds: (ride?.passengers || [])
+        .map((p) => p?.user?.toString?.() || '')
+        .filter(Boolean),
+    });
+    notificationService.notifyRideTrackingEnabled({
       rideId: ride?._id,
       passengerIds: (ride?.passengers || [])
         .map((p) => p?.user?.toString?.() || '')
@@ -104,8 +110,13 @@ export const verifyPassenger = async (req, res, next) => {
 
     emitPassengerVerified(result);
     if (result?.ride) {
-      emitRideUpdated(result.ride);
+      await emitRideUpdated(result.ride);
     }
+    notificationService.notifyPassengerVerified({
+      passengerId: result?.request?.passenger,
+      rideId: result?.ride?._id || req.params.id,
+      requestId: result?.request?._id,
+    });
 
     return successResponse(res, 200, 'Passenger boarding verified', result);
   } catch (err) {
@@ -116,7 +127,7 @@ export const verifyPassenger = async (req, res, next) => {
 export const endRide = async (req, res, next) => {
   try {
     const ride = await rideService.endRide(req.params.id, req.userId);
-    emitRideUpdated(ride);
+    await emitRideUpdated(ride);
     return successResponse(res, 200, 'Ride ended successfully', ride);
   } catch (err) {
     next(err);
@@ -126,7 +137,7 @@ export const endRide = async (req, res, next) => {
 export const completeRide = async (req, res, next) => {
   try {
     const ride = await rideService.completeRide(req.params.id, req.userId);
-    emitRideUpdated(ride);
+    await emitRideUpdated(ride);
     return successResponse(res, 200, 'Ride completed successfully', ride);
   } catch (err) {
     next(err);
@@ -140,10 +151,16 @@ export const updateRideStatus = async (req, res, next) => {
       req.userId,
       req.body.status
     );
-    emitRideUpdated(ride);
+    await emitRideUpdated(ride);
     if (req.body.status === 'started') {
       emitRideStarted(ride);
       emitRideTrackingEnabled(ride);
+      notificationService.notifyRideTrackingEnabled({
+        rideId: ride?._id,
+        passengerIds: (ride?.passengers || [])
+          .map((p) => p?.user?.toString?.() || '')
+          .filter(Boolean),
+      });
     }
 
     return successResponse(res, 200, 'Ride status updated successfully', ride);
@@ -416,7 +433,7 @@ export const joinRide = async (req, res, next) => {
   try {
     const seats = req.body.seats ? parseInt(req.body.seats) : 1;
     const ride = await rideService.joinRide(req.params.id, req.userId, seats);
-    emitRideUpdated(ride);
+    await emitRideUpdated(ride);
 
     return successResponse(res, 200, 'Successfully joined the ride', ride);
   } catch (err) {
@@ -429,7 +446,7 @@ export const joinRide = async (req, res, next) => {
 export const leaveRide = async (req, res, next) => {
   try {
     const ride = await rideService.leaveRide(req.params.id, req.userId);
-    emitRideUpdated(ride);
+    await emitRideUpdated(ride);
     return successResponse(res, 200, 'Successfully left the ride', ride);
   } catch (err) {
     next(err);

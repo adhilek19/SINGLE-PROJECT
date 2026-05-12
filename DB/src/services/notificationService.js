@@ -434,6 +434,53 @@ export const notificationService = {
   notifyRideStarted(args) {
     fireAndForget(this.sendRideStartedPush(args), 'Ride started');
   },
+
+  async sendPassengerVerifiedPush({ passengerId, rideId, requestId }) {
+    const safePassengerId = toId(passengerId);
+    if (!safePassengerId) return;
+
+    await this.sendPushToUser(safePassengerId, {
+      title: 'Boarding verified',
+      body: 'Driver verified your boarding OTP. You are ready for ride start.',
+      url: `/rides/${toId(rideId)}`,
+      tag: `ride-boarding:${toId(requestId) || toId(rideId)}`,
+      data: {
+        type: 'passenger_verified',
+        rideId: toId(rideId),
+        requestId: toId(requestId),
+      },
+    });
+  },
+
+  notifyPassengerVerified(args) {
+    fireAndForget(this.sendPassengerVerifiedPush(args), 'Passenger verified');
+  },
+
+  async sendRideTrackingEnabledPush({ rideId, passengerIds = [] }) {
+    const targets = Array.from(
+      new Set((passengerIds || []).map((id) => toId(id)).filter(Boolean))
+    );
+    if (!targets.length) return;
+
+    await Promise.all(
+      targets.map((passengerId) =>
+        this.sendPushToUser(passengerId, {
+          title: 'Live tracking enabled',
+          body: 'Ride tracking is active. Open ride details to view live location.',
+          url: `/rides/${toId(rideId)}`,
+          tag: `ride-tracking:${toId(rideId)}`,
+          data: {
+            type: 'ride_tracking_enabled',
+            rideId: toId(rideId),
+          },
+        })
+      )
+    );
+  },
+
+  notifyRideTrackingEnabled(args) {
+    fireAndForget(this.sendRideTrackingEnabledPush(args), 'Ride tracking enabled');
+  },
 };
 
 export default notificationService;

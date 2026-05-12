@@ -69,7 +69,7 @@ export const acceptRideRequest = async (req, res, next) => {
 
     emitRideJoinAccepted(request, ride);
     if (ride) {
-      emitRideUpdated(ride);
+      await emitRideUpdated(ride);
     }
     notificationService.notifyRideDecision({
       passengerId: request?.passenger,
@@ -96,7 +96,7 @@ export const rejectRideRequest = async (req, res, next) => {
 
     emitRideJoinRejected(request, ride);
     if (ride) {
-      emitRideUpdated(ride);
+      await emitRideUpdated(ride);
     }
     notificationService.notifyRideDecision({
       passengerId: request?.passenger,
@@ -123,7 +123,7 @@ export const cancelRideRequest = async (req, res, next) => {
 
     emitRideJoinRejected(request, ride);
     if (ride) {
-      emitRideUpdated(ride);
+      await emitRideUpdated(ride);
     }
 
     return successResponse(res, 200, 'Ride request cancelled', { request, ride });
@@ -140,7 +140,7 @@ export const confirmPickup = async (req, res, next) => {
       req.userId,
       req.body
     );
-    emitRideUpdated(request?.ride);
+    await emitRideUpdated(request?.ride);
 
     return successResponse(res, 200, 'Pickup location confirmed', { request });
   } catch (err) {
@@ -155,7 +155,7 @@ export const markNoShow = async (req, res, next) => {
       req.userId,
       req.body.reason
     );
-    emitRideUpdated(request?.ride);
+    await emitRideUpdated(request?.ride);
 
     return successResponse(res, 200, 'No-show marked', { request });
   } catch (err) {

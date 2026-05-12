@@ -21,8 +21,14 @@ export const rideRequestRepository = {
     return RideRequest.findById(id).select('+startPin +startPinHash');
   },
 
-  findAcceptedByRide(rideId) {
-    return RideRequest.find({ ride: rideId, status: 'accepted' }).select('+startPin +startPinHash');
+  findAcceptedByRide(rideId, options = {}) {
+    const query = RideRequest.find({ ride: rideId, status: 'accepted' }).select(
+      '+startPin +startPinHash'
+    );
+    if (options.session) {
+      query.session(options.session);
+    }
+    return query;
   },
 
   findAcceptedByRideAndPassenger({ rideId, passengerId }) {
@@ -67,7 +73,10 @@ export const rideRequestRepository = {
     }).select('_id');
   },
 
-  save(request) {
+  save(request, options = {}) {
+    if (options.session) {
+      return request.save({ session: options.session });
+    }
     return request.save();
   },
 };

@@ -71,6 +71,91 @@ const getPassengerSeatCount = (ride, userId) => {
 const isBoardingVerified = (request) =>
   Boolean(request?.verifiedBoarding || request?.pinVerified);
 
+const isTransactionUnsupportedError = (err) => {
+  const msg = String(err?.message || '');
+  return (
+    err?.code === 20 ||
+    err?.codeName === 'IllegalOperation' ||
+    msg.includes('Transaction numbers are only allowed on a replica set member or mongos')
+  );
+};
+
+const runWithOptionalTransaction = async (callback) => {
+  const session = await mongoose.startSession();
+  try {
+    let result;
+    await session.withTransaction(async () => {
+      result = await callback(session);
+    });
+    return result;
+  } catch (err) {
+    if (isTransactionUnsupportedError(err)) {
+      return callback(null);
+    }
+    throw err;
+  } finally {
+    await session.endSession().catch(() => {});
+  }
+};
+
+const startRideWithoutPassengersInSession = async ({ rideId, driverId, session = null }) => {
+  const ride = await rideRepository.findById(rideId, { session });
+  if (!ride) throw NotFound('Ride not found');
+  if (ride.driver.toString() !== driverId.toString()) {
+    throw Forbidden('Only ride owner can start ride');
+  }
+  if (ride.status !== 'scheduled') {
+    throw BadRequest(`Cannot start ride in ${ride.status} state`);
+  }
+
+  ensureRideCanStartNow(ride);
+
+  const acceptedRequests = await rideRequestRepository.findAcceptedByRide(rideId, { session });
+  const verifiedRequests = acceptedRequests.filter(isBoardingVerified);
+  const allAcceptedVerified =
+    acceptedRequests.length > 0 &&
+    verifiedRequests.length === acceptedRequests.length;
+
+  if (acceptedRequests.length > 0 && !allAcceptedVerified) {
+    if (verifiedRequests.length > 0) {
+      throw BadRequest(
+        'Some passengers are already verified. Verify remaining passengers and use Start Ride.'
+      );
+    }
+
+    const noShowAt = new Date();
+    const acceptedPassengerIds = new Set(
+      acceptedRequests.map((request) => request.passenger?.toString()).filter(Boolean)
+    );
+    const seatsToRelease = acceptedRequests.reduce(
+      (total, request) => total + Math.max(1, Number(request.seatsRequested || 1)),
+      0
+    );
+
+    ride.passengers = (ride.passengers || []).filter(
+      (passenger) => !acceptedPassengerIds.has(passenger.user?.toString())
+    );
+    ride.bookedSeats = Math.max(0, Number(ride.bookedSeats || 0) - seatsToRelease);
+
+    await Promise.all(
+      acceptedRequests.map((request) => {
+        request.status = 'no_show';
+        request.noShowReason = 'Ride started without passengers';
+        request.noShowAt = noShowAt;
+        request.verifiedBoarding = false;
+        request.verifiedBoardingAt = null;
+        request.pinVerified = false;
+        return rideRequestRepository.save(request, { session });
+      })
+    );
+  }
+
+  ride.status = 'started';
+  ride.startTime = new Date();
+  await rideRepository.save(ride, { session });
+  return ride;
+};
+
 export const rideService = {
   async createRide(driverId, data) {
     const {
@@ -238,36 +323,8 @@ export const rideService = {
         );
       }
 
-      if (verifiedRequests.length > 0) {
-        throw BadRequest(
-          'Some passengers are already verified. Verify remaining passengers and use Start Ride.'
-        );
-      }
-
-      const noShowAt = new Date();
-      const acceptedPassengerIds = new Set(
-        acceptedRequests.map((request) => request.passenger?.toString()).filter(Boolean)
-      );
-      const seatsToRelease = acceptedRequests.reduce(
-        (total, request) => total + Math.max(1, Number(request.seatsRequested || 1)),
-        0
-      );
-
-      ride.passengers = (ride.passengers || []).filter(
-        (passenger) => !acceptedPassengerIds.has(passenger.user?.toString())
-      );
-      ride.bookedSeats = Math.max(0, Number(ride.bookedSeats || 0) - seatsToRelease);
-
-      await Promise.all(
-        acceptedRequests.map((request) => {
-          request.status = 'no_show';
-          request.noShowReason = 'Ride started without passengers';
-          request.noShowAt = noShowAt;
-          request.verifiedBoarding = false;
-          request.verifiedBoardingAt = null;
-          request.pinVerified = false;
-          return rideRequestRepository.save(request);
-        })
+      return runWithOptionalTransaction((session) =>
+        startRideWithoutPassengersInSession({ rideId, driverId, session })
       );
     }
 
