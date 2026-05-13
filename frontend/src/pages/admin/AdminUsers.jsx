@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import AdminLayout from '../../components/admin/AdminLayout';
+import UserAvatar from '../../components/common/UserAvatar';
 import { adminService, getErrorMessage } from '../../services/api';
 
 const formatDate = (value) => {
@@ -139,7 +140,10 @@ const AdminUsers = () => {
                   return (
                     <tr key={userId}>
                       <td className="whitespace-nowrap px-4 py-3 text-sm font-semibold text-slate-900">
-                        {user?.name || 'Unnamed'}
+                        <div className="flex items-center gap-2">
+                          <UserAvatar user={user} size="sm" />
+                          <span>{user?.name || 'Unnamed'}</span>
+                        </div>
                       </td>
                       <td className="whitespace-nowrap px-4 py-3 text-sm text-slate-700">{user?.email || '—'}</td>
                       <td className="whitespace-nowrap px-4 py-3 text-sm text-slate-700">{user?.role || 'user'}</td>

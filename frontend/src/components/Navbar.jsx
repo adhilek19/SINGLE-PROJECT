@@ -12,24 +12,7 @@ import {
 import { useDispatch, useSelector } from 'react-redux';
 import { logoutThunk } from '../redux/slices/authSlice';
 import { selectChatUnreadCount } from '../redux/slices/chatSlice';
-
-const Avatar = ({ user, size = 'small' }) => (
-  <div
-    className={`${
-      size === 'large' ? 'w-9 h-9' : 'w-8 h-8'
-    } rounded-full bg-blue-100 border border-blue-200 flex items-center justify-center text-blue-600 overflow-hidden`}
-  >
-    {user?.profilePic ? (
-      <img
-        src={user.profilePic}
-        alt={user.name || 'Profile'}
-        className="w-full h-full object-cover"
-      />
-    ) : (
-      <User className={size === 'large' ? 'w-5 h-5' : 'w-4 h-4'} />
-    )}
-  </div>
-);
+import UserAvatar, { getUserAvatarUrl } from './common/UserAvatar';
 
 const Navbar = () => {
   const navigate = useNavigate();
@@ -120,7 +103,7 @@ const Navbar = () => {
                       to="/profile"
                       className="flex items-center gap-2 hover:text-blue-600"
                     >
-                      <Avatar user={user} />
+                      <UserAvatar user={user} size="sm" />
                       <span className="text-sm font-medium">
                         Hi, {user.name}
                       </span>
@@ -182,7 +165,7 @@ const Navbar = () => {
                 ) : null}
               </Link>
               <Link to="/profile">
-                <Avatar user={user} size="large" />
+                <UserAvatar user={user} size="md" />
               </Link>
             </div>
           ) : (
@@ -226,14 +209,14 @@ const Navbar = () => {
                       >
                         <Icon className="w-7 h-7" />
                       </div>
-                    ) : link.name === 'Profile' && user?.profilePic ? (
+                    ) : link.name === 'Profile' && getUserAvatarUrl(user) ? (
                       <div
                         className={`w-6 h-6 rounded-full overflow-hidden border ${
                           isActive ? 'border-blue-600' : 'border-slate-300'
                         }`}
                       >
                         <img
-                          src={user.profilePic}
+                          src={getUserAvatarUrl(user)}
                           alt="Profile"
                           className="w-full h-full object-cover"
                         />

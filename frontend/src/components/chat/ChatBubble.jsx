@@ -179,7 +179,7 @@ const ChatBubble = ({
 
   return (
     <div className={`flex ${isOwn ? 'justify-end' : 'justify-start'}`}>
-      <div className="max-w-[80%]">
+      <div className="max-w-[85%] md:max-w-[75%]">
         <div
           className={`rounded-2xl px-3 py-2 shadow-sm ${
             isOwn
@@ -190,12 +190,14 @@ const ChatBubble = ({
           {message?.isDeleted ? (
             <p className="text-sm italic opacity-80">This message was deleted</p>
           ) : message?.type === 'text' ? (
-            <p className="text-sm leading-relaxed whitespace-pre-wrap">{message?.text}</p>
+            <p className="break-words text-sm leading-relaxed whitespace-pre-wrap">
+              {message?.text}
+            </p>
           ) : (
             <MediaContent message={message} isOwn={isOwn} />
           )}
 
-          <div className="mt-1 flex items-center justify-end gap-2 text-[11px]">
+          <div className="mt-1 flex min-h-4 items-center justify-end gap-2 text-[11px]">
             <span className={isOwn ? 'text-emerald-100' : 'text-slate-500'}>
               {formatTime(message?.createdAt)}
             </span>
@@ -237,7 +239,7 @@ const ChatBubble = ({
               <button
                 type="button"
                 onClick={() => setReactionPickerOpen((prev) => !prev)}
-                className="rounded-full bg-white/80 p-1 text-slate-500 ring-1 ring-slate-200 hover:bg-white"
+                className="h-6 w-6 rounded-full bg-white/80 p-1 text-slate-500 ring-1 ring-slate-200 hover:bg-white"
                 title="React"
               >
                 <SmilePlus className="h-3.5 w-3.5" />

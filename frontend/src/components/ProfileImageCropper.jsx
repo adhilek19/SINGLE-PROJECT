@@ -90,8 +90,8 @@ const ProfileImageCropper = ({
   if (!file) return null;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/80 px-4">
-      <div className="w-full max-w-xl rounded-3xl bg-white p-5 shadow-2xl">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/85 px-4">
+      <div className="w-full max-w-xl rounded-3xl border border-slate-200 bg-white p-5 shadow-2xl">
         <div className="mb-4 flex items-center justify-between">
           <h3 className="text-lg font-black text-slate-900">Crop Profile Image</h3>
           <button

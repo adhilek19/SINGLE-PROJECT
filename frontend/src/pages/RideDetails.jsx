@@ -15,6 +15,7 @@ import {
 } from 'lucide-react';
 import toast from 'react-hot-toast';
 import RouteMap from '../components/RouteMap';
+import LocationStatusBadge from '../components/common/LocationStatusBadge';
 import { useDispatch, useSelector } from 'react-redux';
 import { fetchRideByIdThunk, cancelRideThunk } from '../redux/slices/rideSlice';
 import { createOrGetChat } from '../redux/slices/chatSlice';
@@ -217,6 +218,13 @@ const RideDetails = () => {
     [acceptedRequests]
   );
   const liveLocations = useMemo(() => Object.values(liveLocationsByUser || {}), [liveLocationsByUser]);
+  const latestLiveUpdateAt = useMemo(() => {
+    if (!liveLocations.length) return '';
+    return liveLocations
+      .map((loc) => loc?.updatedAt)
+      .filter(Boolean)
+      .sort((a, b) => new Date(b).getTime() - new Date(a).getTime())[0] || '';
+  }, [liveLocations]);
   const shareUrl = ride?.shareToken ? `${window.location.origin}/track/${ride.shareToken}` : '';
   const rideReviews = ride?.reviewDetails || [];
   const passengerTargets = (() => {
@@ -950,8 +958,11 @@ const RideDetails = () => {
               <p className="text-sm font-semibold text-emerald-800">
                 Passenger can see driver live location. Driver can see accepted passenger live location. Speed is shown in km/h.
               </p>
+              <div className="mt-2">
+                <LocationStatusBadge isActive={canTrackLive} updatedAt={latestLiveUpdateAt} />
+              </div>
               <p className="mt-1 text-xs font-semibold text-emerald-700">
-                Socket: {socketState} · Location: {locationWatchState}
+                Socket: {socketState} - Location: {locationWatchState}
               </p>
               {locationError ? (
                 <p className="mt-2 rounded-xl bg-amber-100 p-2 text-xs font-bold text-amber-800">
@@ -1223,4 +1234,5 @@ const RideDetails = () => {
 };
 
 export default RideDetails;
+
 

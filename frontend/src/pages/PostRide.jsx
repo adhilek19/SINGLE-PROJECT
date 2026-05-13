@@ -105,6 +105,11 @@ const PostRide = () => {
   const [loading, setLoading] = useState(false);
   const [imagePreview, setImagePreview] = useState(null);
   const [formData, setFormData] = useState(getInitialPostRideForm);
+  const profileVehicle = authUser?.vehicle || {};
+  const hasProfileVehicle = Boolean(
+    String(profileVehicle?.type || '').trim() &&
+      String(profileVehicle?.number || '').trim()
+  );
 
   useEffect(() => {
     const timer = setTimeout(() => {
@@ -123,11 +128,11 @@ const PostRide = () => {
 
   useEffect(() => {
     const vehicle = authUser?.vehicle || {};
-    const hasProfileVehicle = Boolean(
+    const hasVehicle = Boolean(
       String(vehicle?.type || '').trim() &&
         String(vehicle?.number || '').trim()
     );
-    if (!hasProfileVehicle) return;
+    if (!hasVehicle) return;
 
     setFormData((prev) => {
       const hasCustomVehicleValues =
@@ -410,11 +415,22 @@ const PostRide = () => {
                   <h3 className="text-lg font-bold text-slate-800 flex items-center gap-2">
                     <Car className="w-5 h-5 text-blue-500" /> Vehicle Information
                   </h3>
-                  {!authUser?.vehicle?.type ? (
-                    <p className="mt-2 text-xs font-semibold text-amber-700">
-                      Add vehicle details in your profile to auto-fill this next time.
+                  {hasProfileVehicle ? (
+                    <p className="mt-2 text-xs font-semibold text-emerald-700">
+                      Vehicle details auto-filled from your profile.
                     </p>
-                  ) : null}
+                  ) : (
+                    <p className="mt-2 text-xs font-semibold text-amber-700">
+                      Add vehicle details in your profile to auto-fill this next time.{' '}
+                      <button
+                        type="button"
+                        onClick={() => navigate('/profile')}
+                        className="font-black text-blue-700 underline"
+                      >
+                        Open profile
+                      </button>
+                    </p>
+                  )}
                 </div>
 
                 <div className="relative group">

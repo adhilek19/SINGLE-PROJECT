@@ -3,6 +3,10 @@ import { useNavigate } from 'react-router-dom';
 import toast from 'react-hot-toast';
 import { useDispatch, useSelector } from 'react-redux';
 import { getMyChats } from '../redux/slices/chatSlice';
+import UserAvatar from '../components/common/UserAvatar';
+import StatusBadge from '../components/common/StatusBadge';
+import EmptyState from '../components/common/EmptyState';
+import Skeleton from '../components/common/Skeleton';
 
 const toId = (value) =>
   (value && typeof value === 'object' ? value._id : value)?.toString?.() || '';
@@ -13,20 +17,6 @@ const formatTime = (value) => {
     hour: '2-digit',
     minute: '2-digit',
   });
-};
-
-const formatLastSeen = (value) => {
-  if (!value) return '';
-  const time = new Date(value).getTime();
-  if (!Number.isFinite(time)) return '';
-  const delta = Math.max(0, Date.now() - time);
-  const mins = Math.floor(delta / (60 * 1000));
-  if (mins < 1) return 'last seen just now';
-  if (mins < 60) return `last seen ${mins}m ago`;
-  const hours = Math.floor(mins / 60);
-  if (hours < 24) return `last seen ${hours}h ago`;
-  const days = Math.floor(hours / 24);
-  return `last seen ${days}d ago`;
 };
 
 const getOtherParticipant = (chat, currentUserId) =>
@@ -108,7 +98,7 @@ const ChatList = () => {
       <div className="flex-grow bg-slate-100 px-4 py-6">
         <div className="mx-auto max-w-3xl space-y-3">
           {Array.from({ length: 5 }).map((_, index) => (
-            <div key={index} className="h-24 animate-pulse rounded-2xl bg-slate-200" />
+            <Skeleton key={index} className="h-24" />
           ))}
         </div>
       </div>
@@ -134,20 +124,18 @@ const ChatList = () => {
   }
 
   return (
-    <div className="flex-grow bg-slate-100 px-3 py-4 md:px-6 md:py-6">
+    <div className="flex-grow bg-slate-50 px-3 py-4 md:px-6 md:py-6">
       <div className="mx-auto max-w-3xl">
-        <div className="mb-4 rounded-2xl bg-white p-4 shadow-sm border border-slate-200">
+        <div className="mb-4 rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
           <h1 className="text-xl font-black text-slate-900">Chats</h1>
           <p className="text-sm text-slate-500">Driver and passenger conversations</p>
         </div>
 
         {!chatItems.length ? (
-          <div className="rounded-2xl border border-slate-200 bg-white p-8 text-center">
-            <h2 className="text-lg font-black text-slate-900">No chats yet</h2>
-            <p className="mt-2 text-sm text-slate-500">
-              Open a ride and use Message Driver or Message Passenger.
-            </p>
-          </div>
+          <EmptyState
+            title="No chats yet"
+            description="Open a ride and use Message Driver or Message Passenger."
+          />
         ) : (
           <div className="space-y-2">
             {chatItems.map((item) => (
@@ -164,47 +152,38 @@ const ChatList = () => {
                 className="w-full rounded-2xl border border-slate-200 bg-white p-4 text-left shadow-sm transition hover:bg-slate-50"
               >
                 <div className="flex items-start gap-3">
-                  <div className="relative">
-                    <div className="h-12 w-12 overflow-hidden rounded-full bg-slate-200">
-                      {item.otherUser?.profilePic ? (
-                        <img
-                          src={item.otherUser.profilePic}
-                          alt={item.otherUser?.name || 'User'}
-                          className="h-full w-full object-cover"
-                        />
-                      ) : null}
-                    </div>
-                    {item.isOnline ? (
-                      <span className="absolute bottom-0 right-0 h-3 w-3 rounded-full border-2 border-white bg-emerald-500" />
-                    ) : null}
-                  </div>
+                  <UserAvatar user={item.otherUser} size="md" showOnline={item.isOnline} />
 
-                  <div className="min-w-0 flex-1">
+                  <div className="min-w-0 flex-1 space-y-1">
                     <div className="flex items-center justify-between gap-2">
                       <h2 className="truncate text-sm font-black text-slate-900">
                         {item.otherUser?.name || 'User'}
                       </h2>
                       <span className="shrink-0 text-xs text-slate-500">{item.timeLabel}</span>
                     </div>
-                    <p className="mt-1 truncate text-sm text-slate-600">{item.lastMessage}</p>
-                    <p className="mt-1 truncate text-xs text-slate-400">
+
+                    <p className="truncate text-sm text-slate-600">{item.lastMessage}</p>
+                    <p className="truncate text-xs text-slate-400">
                       {item.from} to {item.to}
                     </p>
-                    {item.chatKind === 'inquiry' ? (
-                      <p className="mt-1 text-[11px] font-semibold text-amber-600">
-                        Inquiry chat
-                      </p>
-                    ) : null}
-                    <p className="mt-1 text-[11px] font-semibold text-slate-400">
-                      {item.isOnline ? 'online' : formatLastSeen(item.lastSeen) || 'offline'}
-                    </p>
+
+                    <div className="flex items-center gap-2">
+                      <StatusBadge isOnline={item.isOnline} lastSeenAt={item.lastSeen} />
+                      {item.chatKind === 'inquiry' ? (
+                        <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[11px] font-semibold text-amber-700">
+                          Inquiry
+                        </span>
+                      ) : null}
+                    </div>
                   </div>
 
-                  {item.unreadCount > 0 ? (
-                    <span className="inline-flex h-6 min-w-6 items-center justify-center rounded-full bg-emerald-600 px-2 text-xs font-black text-white">
-                      {item.unreadCount}
-                    </span>
-                  ) : null}
+                  <div className="min-h-10 w-9 text-right">
+                    {item.unreadCount > 0 ? (
+                      <span className="inline-flex h-6 min-w-6 items-center justify-center rounded-full bg-emerald-600 px-2 text-xs font-black text-white">
+                        {item.unreadCount}
+                      </span>
+                    ) : null}
+                  </div>
                 </div>
               </button>
             ))}

@@ -27,26 +27,14 @@ import {
   sendTyping,
   setActiveChatFocus,
 } from '../services/chatSocket';
+import UserAvatar, { getUserAvatarUrl } from '../components/common/UserAvatar';
+import StatusBadge from '../components/common/StatusBadge';
 
 const toId = (value) =>
   (value && typeof value === 'object' ? value._id : value)?.toString?.() || '';
 
 const createClientMessageId = () =>
   `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
-
-const formatLastSeen = (value) => {
-  if (!value) return '';
-  const time = new Date(value).getTime();
-  if (!Number.isFinite(time)) return '';
-  const delta = Math.max(0, Date.now() - time);
-  const mins = Math.floor(delta / (60 * 1000));
-  if (mins < 1) return 'last seen just now';
-  if (mins < 60) return `last seen ${mins}m ago`;
-  const hours = Math.floor(mins / 60);
-  if (hours < 24) return `last seen ${hours}h ago`;
-  const days = Math.floor(hours / 24);
-  return `last seen ${days}d ago`;
-};
 
 const ChatRoom = () => {
   const { chatId } = useParams();
@@ -493,7 +481,7 @@ const ChatRoom = () => {
       chatId: safeChatId,
       otherUserId,
       otherUserName: otherUser?.name || 'User',
-      otherUserAvatar: otherUser?.profilePic || '',
+      otherUserAvatar: getUserAvatarUrl(otherUser),
     });
   };
 
@@ -566,9 +554,9 @@ const ChatRoom = () => {
   }
 
   return (
-    <div className="flex h-[calc(100vh-112px)] flex-col bg-slate-100 md:h-[calc(100vh-64px)]">
-      <header className="border-b border-slate-200 bg-white px-3 py-3 shadow-sm">
-        <div className="mx-auto flex w-full max-w-4xl items-center gap-3">
+    <div className="flex h-[calc(100vh-112px)] flex-col overflow-x-hidden bg-slate-100 md:h-[calc(100vh-64px)]">
+      <header className="sticky top-0 z-20 border-b border-slate-200 bg-white px-3 py-3 shadow-sm">
+        <div className="mx-auto flex w-full max-w-4xl items-center gap-2 md:gap-3">
           <button
             type="button"
             onClick={() => navigate('/chats')}
@@ -577,33 +565,22 @@ const ChatRoom = () => {
             Back
           </button>
 
-          <div className="relative h-10 w-10 overflow-hidden rounded-full bg-slate-200">
-            {otherUser?.profilePic ? (
-              <img
-                src={otherUser.profilePic}
-                alt={otherUser?.name || 'User'}
-                className="h-full w-full object-cover"
-              />
-            ) : null}
-            {otherUserOnline ? (
-              <span className="absolute bottom-0 right-0 h-2.5 w-2.5 rounded-full border border-white bg-emerald-500" />
-            ) : null}
-          </div>
+          <UserAvatar user={otherUser} size="md" showOnline={otherUserOnline} />
 
-          <div className="min-w-0">
+          <div className="min-w-0 flex-1">
             <h1 className="truncate text-sm font-black text-slate-900">
               {otherUser?.name || 'Chat'}
             </h1>
-            {chat?.chatKind === 'inquiry' ? (
-              <p className="text-[11px] font-semibold text-amber-600">Inquiry chat</p>
-            ) : null}
-            <p className="truncate text-xs text-slate-500">
-              {otherUserOnline ? 'online' : formatLastSeen(otherUserLastSeen) || 'offline'}
-            </p>
+            <div className="mt-0.5 flex items-center gap-2">
+              <StatusBadge isOnline={otherUserOnline} lastSeenAt={otherUserLastSeen} />
+              {chat?.chatKind === 'inquiry' ? (
+                <p className="text-[11px] font-semibold text-amber-600">Inquiry chat</p>
+              ) : null}
+            </div>
             <p className="truncate text-[11px] text-slate-400">{rideSummary}</p>
           </div>
 
-          <div className="ml-auto flex items-center gap-2">
+          <div className="ml-1 flex shrink-0 flex-wrap items-center justify-end gap-2">
             <button
               type="button"
               onClick={handleStartCall}
@@ -612,17 +589,20 @@ const ChatRoom = () => {
                 !otherUserId ||
                 hasBusyCall
               }
-              className="inline-flex items-center gap-1 rounded-xl bg-emerald-600 px-3 py-1.5 text-xs font-bold text-white disabled:opacity-50"
+              className="inline-flex items-center gap-1 rounded-xl bg-emerald-600 px-2.5 py-1.5 text-xs font-bold text-white disabled:opacity-50"
               title="Audio call"
             >
               <Phone className="h-3.5 w-3.5" />
               {callInThisChat && callStateLabel ? callStateLabel : 'Call'}
             </button>
 
+            {chat?.chatKind === 'inquiry' ? (
+              <p className="hidden text-[11px] font-semibold text-amber-600 md:block">Inquiry</p>
+            ) : null}
             {chat?.ride?._id ? (
               <Link
                 to={`/ride/${chat.ride._id}`}
-                className="rounded-xl bg-emerald-50 px-3 py-1.5 text-xs font-bold text-emerald-700"
+                className="rounded-xl bg-emerald-50 px-2.5 py-1.5 text-xs font-bold text-emerald-700"
               >
                 Open Ride
               </Link>
@@ -632,7 +612,7 @@ const ChatRoom = () => {
       </header>
 
       <main className="mx-auto flex w-full max-w-4xl flex-1 flex-col overflow-hidden">
-        <div className="flex-1 space-y-2 overflow-y-auto px-3 py-4">
+        <div className="flex-1 space-y-2 overflow-y-auto overflow-x-hidden px-3 py-4">
           {!messages.length ? (
             <div className="mt-10 text-center">
               <p className="text-sm text-slate-500">No messages yet</p>
@@ -659,16 +639,18 @@ const ChatRoom = () => {
           <div ref={scrollAnchorRef} />
         </div>
 
-        <MessageInput
-          onSend={handleSend}
-          onSendMedia={handleSendMedia}
-          onSendVoice={handleSendVoice}
-          onTypingStart={handleTypingStart}
-          onTypingStop={handleTypingStop}
-          disabled={mediaUploading}
-          mediaUploading={mediaUploading}
-          mediaUploadProgress={mediaUploadProgress}
-        />
+        <div className="sticky bottom-0 bg-white">
+          <MessageInput
+            onSend={handleSend}
+            onSendMedia={handleSendMedia}
+            onSendVoice={handleSendVoice}
+            onTypingStart={handleTypingStart}
+            onTypingStop={handleTypingStop}
+            disabled={mediaUploading}
+            mediaUploading={mediaUploading}
+            mediaUploadProgress={mediaUploadProgress}
+          />
+        </div>
       </main>
     </div>
   );
