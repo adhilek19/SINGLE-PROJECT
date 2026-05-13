@@ -2,6 +2,7 @@ import { Router } from 'express';
 import * as rideController from '../controller/rideController.js';
 import * as rideRequestController from '../controller/rideRequestController.js';
 import { protect } from '../middleware/protect.js';
+import { requireCompleteProfile } from '../middleware/requireCompleteProfile.js';
 import { validate } from '../middleware/validate.js';
 import {
   createRideSchema,
@@ -22,6 +23,7 @@ router.get('/search', rideController.searchRides);
 router.post(
   '/',
   protect,
+  requireCompleteProfile,
   upload.single('vehicleImage'),
   validate(createRideSchema),
   rideController.createRide

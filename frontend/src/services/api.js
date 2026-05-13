@@ -178,6 +178,27 @@ export const authService = {
     }),
   getProfile: () => api.get('/auth/me'),
   updateProfile: (data) => api.put('/auth/me', data),
+  patchProfile: (data) => api.patch('/auth/me/profile', data),
+  uploadProfileImage: (file) => {
+    const formData = new FormData();
+    formData.append('image', file);
+    return api.post('/auth/me/profile-image', formData, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+    });
+  },
+  deleteProfileImage: () => api.delete('/auth/me/profile-image'),
+  uploadProfileDocument: ({ documentType, file }) => {
+    const formData = new FormData();
+    formData.append('documentType', documentType);
+    formData.append('document', file);
+    return api.post('/auth/me/documents', formData, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+    });
+  },
+  deleteProfileDocument: (documentType) =>
+    api.delete(`/auth/me/documents/${documentType}`),
+  patchVehicle: (data) => api.patch('/auth/me/vehicle', data),
+  deleteVehicle: () => api.delete('/auth/me/vehicle'),
   updateLocation: (data) => api.put('/auth/me/location', data),
   getPublicProfile: (id) => api.get(`/auth/users/${id}/public`),
   blockUser: (userId) => api.post(`/auth/me/block/${userId}`),

@@ -1,5 +1,6 @@
 import mongoose from 'mongoose';
 import bcrypt from 'bcryptjs';
+import { DEFAULT_AVATAR_KEYS, getDefaultAvatarUrl } from '../utils/defaultAvatars.js';
 
 const trustedContactSchema = new mongoose.Schema(
   {
@@ -78,6 +79,12 @@ const vehicleSchema = new mongoose.Schema(
       enum: ['bike', 'car', 'auto', 'van'],
     },
 
+    brand: {
+      type: String,
+      trim: true,
+      default: '',
+    },
+
     number: {
       type: String,
       trim: true,
@@ -87,12 +94,55 @@ const vehicleSchema = new mongoose.Schema(
     model: {
       type: String,
       trim: true,
+      default: '',
+    },
+
+    seats: {
+      type: Number,
+      min: 1,
+      max: 12,
+      default: null,
     },
 
     image: {
       type: String,
       default: '',
     },
+  },
+  { _id: false }
+);
+
+const profileImageSchema = new mongoose.Schema(
+  {
+    url: { type: String, trim: true, default: '' },
+    publicId: { type: String, trim: true, default: '' },
+    uploadedAt: { type: Date, default: null },
+  },
+  { _id: false }
+);
+
+const documentSchema = new mongoose.Schema(
+  {
+    url: { type: String, trim: true, default: '' },
+    publicId: { type: String, trim: true, default: '' },
+    type: { type: String, trim: true, default: '' },
+    mimeType: { type: String, trim: true, default: '' },
+    uploadedAt: { type: Date, default: null },
+    status: {
+      type: String,
+      enum: ['pending', 'approved', 'rejected'],
+      default: 'pending',
+    },
+    rejectionReason: { type: String, trim: true, default: '' },
+  },
+  { _id: false }
+);
+
+const verificationDocumentsSchema = new mongoose.Schema(
+  {
+    idProof: { type: documentSchema, default: () => ({}) },
+    drivingLicense: { type: documentSchema, default: () => ({}) },
+    vehicleDocument: { type: documentSchema, default: () => ({}) },
   },
   { _id: false }
 );
@@ -145,6 +195,17 @@ const userSchema = new mongoose.Schema(
 
     profilePic: {
       type: String,
+      default: '',
+    },
+
+    profileImage: {
+      type: profileImageSchema,
+      default: () => ({}),
+    },
+
+    selectedAvatar: {
+      type: String,
+      enum: [...DEFAULT_AVATAR_KEYS, ''],
       default: '',
     },
 
@@ -207,6 +268,11 @@ const userSchema = new mongoose.Schema(
       type: vehicleSchema,
       default: () => ({}),
     },
+
+    verificationDocuments: {
+      type: verificationDocumentsSchema,
+      default: () => ({}),
+    },
   },
   { timestamps: true }
 );
@@ -220,14 +286,32 @@ userSchema.pre('validate', function () {
 
   this.verification = this.verification || {};
 
+  const uploadedProfileUrl = String(this.profileImage?.url || '').trim();
+  const selectedAvatarUrl = getDefaultAvatarUrl(this.selectedAvatar);
+  const legacyProfileUrl = String(this.profilePic || '').trim();
+
+  if (uploadedProfileUrl) {
+    this.profilePic = uploadedProfileUrl;
+  } else if (selectedAvatarUrl) {
+    this.profilePic = selectedAvatarUrl;
+  } else if (!legacyProfileUrl || legacyProfileUrl.includes('dicebear.com/7.x/adventurer/svg?seed=')) {
+    this.profilePic = '';
+  }
+
   this.verification.email = Boolean(this.isVerified);
-  this.verification.profilePhoto = Boolean(this.profilePic);
+  this.verification.profilePhoto = Boolean(uploadedProfileUrl || selectedAvatarUrl || legacyProfileUrl);
   this.verification.phone = Boolean(this.phone);
+  this.verification.id = Boolean(
+    this.verificationDocuments?.idProof?.status === 'approved' ||
+      this.verificationDocuments?.drivingLicense?.status === 'approved'
+  );
   this.verification.vehicle = Boolean(
     this.vehicle?.type ||
+      this.vehicle?.brand ||
       this.vehicle?.model ||
       this.vehicle?.number ||
-      this.vehicle?.image
+      this.vehicle?.image ||
+      this.verificationDocuments?.vehicleDocument?.status === 'approved'
   );
 });
 

@@ -19,7 +19,14 @@ import {
   emailSchema,
   updateProfileSchema,
   updateLocationSchema,
+  patchProfileSchema,
+  patchVehicleSchema,
+  uploadProfileDocumentSchema,
 } from '../utils/validators.js';
+import {
+  uploadProfileDocument,
+  uploadProfileImage,
+} from '../middleware/profileUpload.js';
 
 import { env } from '../config/env.js';
 import { generateAccessToken, generateRefreshToken } from '../utils/token.js';
@@ -83,6 +90,33 @@ router.put(
   validate(updateProfileSchema),
   auth.updateProfile
 );
+
+router.patch(
+  '/me/profile',
+  protect,
+  validate(patchProfileSchema),
+  auth.patchProfile
+);
+
+router.post('/me/profile-image', protect, uploadProfileImage, auth.uploadProfileImage);
+router.delete('/me/profile-image', protect, auth.deleteProfileImage);
+
+router.post(
+  '/me/documents',
+  protect,
+  uploadProfileDocument,
+  validate(uploadProfileDocumentSchema),
+  auth.uploadProfileDocument
+);
+router.delete('/me/documents/:documentType', protect, auth.deleteProfileDocument);
+
+router.patch(
+  '/me/vehicle',
+  protect,
+  validate(patchVehicleSchema),
+  auth.patchVehicle
+);
+router.delete('/me/vehicle', protect, auth.deleteVehicle);
 
 router.put(
   '/me/location',

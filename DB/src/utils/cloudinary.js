@@ -19,4 +19,45 @@ const storage = new CloudinaryStorage({
 });
 
 export const upload = multer({ storage: storage });
+
+export const uploadBufferToCloudinary = ({
+  buffer,
+  folder = 'sahayatri/profile',
+  publicId = '',
+  resourceType = 'auto',
+}) =>
+  new Promise((resolve, reject) => {
+    if (!buffer) {
+      reject(new Error('File buffer is required'));
+      return;
+    }
+
+    const stream = cloudinary.uploader.upload_stream(
+      {
+        folder,
+        public_id: publicId || undefined,
+        resource_type: resourceType,
+      },
+      (err, result) => {
+        if (err) {
+          reject(err);
+          return;
+        }
+        resolve(result);
+      }
+    );
+
+    stream.end(buffer);
+  });
+
+export const destroyCloudinaryAsset = async (publicId, resourceType = 'image') => {
+  const safePublicId = String(publicId || '').trim();
+  if (!safePublicId) return;
+
+  await cloudinary.uploader.destroy(safePublicId, {
+    invalidate: true,
+    resource_type: resourceType,
+  });
+};
+
 export { cloudinary };

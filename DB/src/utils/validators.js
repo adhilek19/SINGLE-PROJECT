@@ -64,10 +64,11 @@ const locationSchema = Joi.object({
 
 const vehicleSchema = Joi.object({
   type: Joi.string().valid('bike', 'car', 'auto', 'van').required(),
-  brand: Joi.string().trim().optional(),
-  model: Joi.string().trim().optional(),
+  brand: Joi.string().trim().allow('').optional(),
+  model: Joi.string().trim().allow('').optional(),
   number: Joi.string().trim().uppercase().allow('').optional(),
   image: Joi.string().uri().allow('').optional(),
+  seats: Joi.number().integer().min(1).max(12).optional(),
   verified: Joi.boolean().optional(),
 }).required();
 
@@ -142,11 +143,26 @@ export const updateProfileSchema = Joi.object({
   phone: Joi.string().trim().allow('').optional(),
   bio: Joi.string().trim().max(300).allow('').optional(),
   profilePic: Joi.string().uri().allow('').optional(),
+  selectedAvatar: Joi.string()
+    .valid(
+      'avatar_1',
+      'avatar_2',
+      'avatar_3',
+      'avatar_4',
+      'avatar_5',
+      'avatar_6',
+      'avatar_7',
+      'avatar_8',
+      ''
+    )
+    .optional(),
   currentLocation: currentLocationSchema.optional(),
   vehicle: Joi.object({
     type: Joi.string().valid('bike', 'car', 'auto', 'van').allow('').optional(),
+    brand: Joi.string().trim().allow('').optional(),
     number: Joi.string().trim().uppercase().allow('').optional(),
     model: Joi.string().trim().allow('').optional(),
+    seats: Joi.number().integer().min(1).max(12).allow(null).optional(),
     image: Joi.string().uri().allow('').optional(),
   }).optional(),
   trustedContact: Joi.object({
@@ -161,6 +177,51 @@ export const updateProfileSchema = Joi.object({
     requireRideShare: Joi.boolean().optional(),
   }).optional(),
 }).min(1);
+
+export const patchProfileSchema = Joi.object({
+  name: Joi.string().min(2).max(50).trim().optional(),
+  phone: Joi.string().trim().allow('').optional(),
+  bio: Joi.string().trim().max(300).allow('').optional(),
+  selectedAvatar: Joi.string()
+    .valid(
+      'avatar_1',
+      'avatar_2',
+      'avatar_3',
+      'avatar_4',
+      'avatar_5',
+      'avatar_6',
+      'avatar_7',
+      'avatar_8',
+      ''
+    )
+    .optional(),
+  trustedContact: Joi.object({
+    name: Joi.string().trim().allow('').optional(),
+    phone: Joi.string().trim().allow('').optional(),
+    relationship: Joi.string().trim().allow('').optional(),
+  }).optional(),
+  safetyPreferences: Joi.object({
+    womenOnlyRides: Joi.boolean().optional(),
+    verifiedOnlyRides: Joi.boolean().optional(),
+    hidePhoneNumber: Joi.boolean().optional(),
+    requireRideShare: Joi.boolean().optional(),
+  }).optional(),
+}).min(1);
+
+export const patchVehicleSchema = Joi.object({
+  type: Joi.string().valid('bike', 'car', 'auto', 'van').required(),
+  brand: Joi.string().trim().allow('').required(),
+  model: Joi.string().trim().allow('').required(),
+  number: Joi.string().trim().uppercase().min(4).max(20).required(),
+  seats: Joi.number().integer().min(1).max(12).required(),
+  image: Joi.string().uri().allow('').optional(),
+});
+
+export const uploadProfileDocumentSchema = Joi.object({
+  documentType: Joi.string()
+    .valid('idProof', 'drivingLicense', 'vehicleDocument')
+    .required(),
+});
 
 export const updateLocationSchema = Joi.object({
   lat: Joi.number().required().min(-90).max(90).messages({

@@ -1,45 +1,22 @@
 import { authService } from '../services/authService.js';
 import { successResponse } from '../utils/apiResponse.js';
-import { AppError, NotFound } from '../utils/AppError.js';
+import { AppError, BadRequest, NotFound } from '../utils/AppError.js';
 import { userRepository } from '../repositories/userRepository.js';
 import { Review } from '../models/Review.js';
 import Ride from '../models/Ride.js';
+import { logger } from '../utils/logger.js';
 import {
   refreshTokenCookieBaseOptions,
   refreshTokenCookieOptions,
 } from '../utils/authCookie.js';
-
-const toClientLocation = (location) => {
-  if (!location) return null;
-
-  if (location.lat !== undefined && location.lng !== undefined) {
-    return {
-      name: location.name || 'Current location',
-      lat: Number(location.lat),
-      lng: Number(location.lng),
-      updatedAt: location.updatedAt,
-    };
-  }
-
-  const coords = location.coordinates || [];
-  if (Array.isArray(coords) && coords.length >= 2) {
-    return {
-      name: location.name || 'Current location',
-      lat: Number(coords[1]),
-      lng: Number(coords[0]),
-      updatedAt: location.updatedAt,
-    };
-  }
-
-  return null;
-};
-
-const normalizeUserForClient = (userDoc) => {
-  if (!userDoc) return userDoc;
-  const user = userDoc.toObject ? userDoc.toObject() : { ...userDoc };
-  user.currentLocation = toClientLocation(user.currentLocation);
-  return user;
-};
+import {
+  normalizeUserForClient,
+  normalizeVehicleForClient,
+} from '../utils/profileCompletion.js';
+import {
+  destroyCloudinaryAsset,
+  uploadBufferToCloudinary,
+} from '../utils/cloudinary.js';
 
 const sanitizePublicRide = (rideDoc) => {
   if (!rideDoc) return null;
@@ -98,6 +75,28 @@ const toGeoLocation = (location) => {
     updatedAt: new Date(),
   };
 };
+
+const allowedDocumentTypes = new Set([
+  'idProof',
+  'drivingLicense',
+  'vehicleDocument',
+]);
+
+const toResourceTypeFromMime = (mimeType = '') => {
+  const safeMime = String(mimeType || '').toLowerCase();
+  if (safeMime.includes('pdf')) return 'raw';
+  return 'image';
+};
+
+const clearDocumentPayload = () => ({
+  url: '',
+  publicId: '',
+  type: '',
+  mimeType: '',
+  uploadedAt: null,
+  status: 'pending',
+  rejectionReason: '',
+});
 
 export const register = async (req, res, next) => {
   try {
@@ -210,51 +209,269 @@ export const getProfile = async (req, res, next) => {
 
 export const updateProfile = async (req, res, next) => {
   try {
+    const user = await userRepository.findById(req.userId);
+    if (!user) throw NotFound('User not found');
+
     const allowed = [
       'name',
       'phone',
       'bio',
-      'profilePic',
-      'vehicle',
+      'selectedAvatar',
       'trustedContact',
       'safetyPreferences',
-      'currentLocation',
     ];
-
-    const data = {};
 
     allowed.forEach((key) => {
       if (req.body[key] !== undefined) {
-        data[key] = req.body[key];
+        user[key] = req.body[key];
       }
     });
 
-    if (data.vehicle) {
-      data.vehicle = {
-        ...data.vehicle,
-        ...(data.vehicle.type ? { type: data.vehicle.type } : {}),
+    if (req.body.profilePic !== undefined) {
+      user.profilePic = String(req.body.profilePic || '').trim();
+    }
+
+    if (req.body.vehicle !== undefined) {
+      const incomingVehicle = req.body.vehicle || {};
+      user.vehicle = {
+        ...(user.vehicle?.toObject?.() || user.vehicle || {}),
+        ...incomingVehicle,
       };
-
-      if (!data.vehicle.type) {
-        delete data.vehicle.type;
+      if (user.vehicle?.number) {
+        user.vehicle.number = String(user.vehicle.number).trim().toUpperCase();
       }
     }
 
-    if (data.currentLocation) {
-      const geoLocation = toGeoLocation(data.currentLocation);
-      if (geoLocation) {
-        data.currentLocation = geoLocation;
-      } else {
-        delete data.currentLocation;
-      }
+    if (req.body.currentLocation !== undefined) {
+      const geoLocation = toGeoLocation(req.body.currentLocation);
+      user.currentLocation = geoLocation;
     }
 
-    const user = await userRepository
-      .updateById(req.userId, data)
-      .select('-password');
+    await userRepository.save(user);
 
     return successResponse(res, 200, 'Profile updated', {
       user: normalizeUserForClient(user),
+    });
+  } catch (err) {
+    next(err);
+  }
+};
+
+export const patchProfile = async (req, res, next) => {
+  try {
+    const user = await userRepository.findById(req.userId);
+    if (!user) throw NotFound('User not found');
+
+    const updatable = ['name', 'phone', 'bio', 'selectedAvatar', 'trustedContact', 'safetyPreferences'];
+    updatable.forEach((field) => {
+      if (req.body[field] !== undefined) {
+        user[field] = req.body[field];
+      }
+    });
+
+    await userRepository.save(user);
+
+    return successResponse(res, 200, 'Profile updated', {
+      user: normalizeUserForClient(user),
+    });
+  } catch (err) {
+    next(err);
+  }
+};
+
+export const uploadProfileImage = async (req, res, next) => {
+  try {
+    if (!req.file?.buffer) {
+      throw BadRequest('Profile image file is required');
+    }
+
+    const user = await userRepository.findById(req.userId);
+    if (!user) throw NotFound('User not found');
+
+    const previousPublicId = String(user?.profileImage?.publicId || '').trim();
+    const uploadResult = await uploadBufferToCloudinary({
+      buffer: req.file.buffer,
+      folder: 'sahayatri/profile-images',
+      publicId: `user_${req.userId}_${Date.now()}`,
+      resourceType: 'image',
+    });
+
+    user.profileImage = {
+      url: String(uploadResult?.secure_url || ''),
+      publicId: String(uploadResult?.public_id || ''),
+      uploadedAt: new Date(),
+    };
+    await userRepository.save(user);
+
+    if (previousPublicId && previousPublicId !== user.profileImage.publicId) {
+      destroyCloudinaryAsset(previousPublicId, 'image').catch((err) => {
+        logger.warn({
+          event: 'profile_image_destroy_failed',
+          userId: req.userId,
+          reason: err?.message || 'unknown',
+        });
+      });
+    }
+
+    return successResponse(res, 200, 'Profile image uploaded', {
+      user: normalizeUserForClient(user),
+    });
+  } catch (err) {
+    next(err);
+  }
+};
+
+export const deleteProfileImage = async (req, res, next) => {
+  try {
+    const user = await userRepository.findById(req.userId);
+    if (!user) throw NotFound('User not found');
+
+    const previousPublicId = String(user?.profileImage?.publicId || '').trim();
+    user.profileImage = { url: '', publicId: '', uploadedAt: null };
+    await userRepository.save(user);
+
+    if (previousPublicId) {
+      destroyCloudinaryAsset(previousPublicId, 'image').catch((err) => {
+        logger.warn({
+          event: 'profile_image_destroy_failed',
+          userId: req.userId,
+          reason: err?.message || 'unknown',
+        });
+      });
+    }
+
+    return successResponse(res, 200, 'Profile image removed', {
+      user: normalizeUserForClient(user),
+    });
+  } catch (err) {
+    next(err);
+  }
+};
+
+export const uploadProfileDocument = async (req, res, next) => {
+  try {
+    const documentType = String(req.body?.documentType || '').trim();
+    if (!allowedDocumentTypes.has(documentType)) {
+      throw BadRequest('Invalid document type');
+    }
+    if (!req.file?.buffer) {
+      throw BadRequest('Document file is required');
+    }
+
+    const user = await userRepository.findById(req.userId);
+    if (!user) throw NotFound('User not found');
+
+    const oldDoc = user?.verificationDocuments?.[documentType] || {};
+    const oldPublicId = String(oldDoc?.publicId || '').trim();
+    const oldMime = String(oldDoc?.mimeType || '');
+
+    const uploadResult = await uploadBufferToCloudinary({
+      buffer: req.file.buffer,
+      folder: 'sahayatri/profile-documents',
+      publicId: `user_${req.userId}_${documentType}_${Date.now()}`,
+      resourceType: toResourceTypeFromMime(req.file.mimetype),
+    });
+
+    user.verificationDocuments = user.verificationDocuments || {};
+    user.verificationDocuments[documentType] = {
+      url: String(uploadResult?.secure_url || ''),
+      publicId: String(uploadResult?.public_id || ''),
+      type: String(req.file.originalname || '').split('.').pop()?.toLowerCase() || '',
+      mimeType: String(req.file.mimetype || '').toLowerCase(),
+      uploadedAt: new Date(),
+      status: 'pending',
+      rejectionReason: '',
+    };
+    await userRepository.save(user);
+
+    if (oldPublicId) {
+      destroyCloudinaryAsset(oldPublicId, toResourceTypeFromMime(oldMime)).catch((err) => {
+        logger.warn({
+          event: 'profile_document_destroy_failed',
+          userId: req.userId,
+          documentType,
+          reason: err?.message || 'unknown',
+        });
+      });
+    }
+
+    return successResponse(res, 200, 'Document uploaded', {
+      user: normalizeUserForClient(user),
+    });
+  } catch (err) {
+    next(err);
+  }
+};
+
+export const deleteProfileDocument = async (req, res, next) => {
+  try {
+    const documentType = String(req.params.documentType || '').trim();
+    if (!allowedDocumentTypes.has(documentType)) {
+      throw BadRequest('Invalid document type');
+    }
+
+    const user = await userRepository.findById(req.userId);
+    if (!user) throw NotFound('User not found');
+
+    const existing = user?.verificationDocuments?.[documentType] || {};
+    const oldPublicId = String(existing?.publicId || '').trim();
+    const oldMime = String(existing?.mimeType || '');
+
+    user.verificationDocuments = user.verificationDocuments || {};
+    user.verificationDocuments[documentType] = clearDocumentPayload();
+    await userRepository.save(user);
+
+    if (oldPublicId) {
+      destroyCloudinaryAsset(oldPublicId, toResourceTypeFromMime(oldMime)).catch((err) => {
+        logger.warn({
+          event: 'profile_document_destroy_failed',
+          userId: req.userId,
+          documentType,
+          reason: err?.message || 'unknown',
+        });
+      });
+    }
+
+    return successResponse(res, 200, 'Document removed', {
+      user: normalizeUserForClient(user),
+    });
+  } catch (err) {
+    next(err);
+  }
+};
+
+export const patchVehicle = async (req, res, next) => {
+  try {
+    const user = await userRepository.findById(req.userId);
+    if (!user) throw NotFound('User not found');
+
+    user.vehicle = {
+      ...(user.vehicle?.toObject?.() || {}),
+      ...req.body,
+      number: String(req.body?.number || '').trim().toUpperCase(),
+    };
+    await userRepository.save(user);
+
+    return successResponse(res, 200, 'Vehicle updated', {
+      user: normalizeUserForClient(user),
+      vehicle: normalizeVehicleForClient(user.vehicle),
+    });
+  } catch (err) {
+    next(err);
+  }
+};
+
+export const deleteVehicle = async (req, res, next) => {
+  try {
+    const user = await userRepository.findById(req.userId);
+    if (!user) throw NotFound('User not found');
+
+    user.vehicle = {};
+    await userRepository.save(user);
+
+    return successResponse(res, 200, 'Vehicle removed', {
+      user: normalizeUserForClient(user),
+      vehicle: normalizeVehicleForClient(user.vehicle),
     });
   } catch (err) {
     next(err);

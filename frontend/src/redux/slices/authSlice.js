@@ -54,6 +54,9 @@ const parseJwtPayload = (token) => {
 
 const normalizeUser = (user, token) => {
   const payload = token ? parseJwtPayload(token) : null;
+  const profileImage = user?.profileImage || {};
+  const verificationDocuments = user?.verificationDocuments || {};
+  const vehicle = user?.vehicle || {};
 
   return {
     id: user?.id || user?._id || payload?.id,
@@ -61,11 +64,56 @@ const normalizeUser = (user, token) => {
     name: user?.name || 'User',
     email: user?.email || '',
     profilePic: user?.profilePic || '',
+    selectedAvatar: user?.selectedAvatar || '',
+    profileImage: {
+      url: profileImage?.url || '',
+      uploadedAt: profileImage?.uploadedAt || null,
+    },
     bio: user?.bio || '',
     rating: user?.rating ?? 0,
     rideCount: user?.rideCount ?? 0,
     isVerified: user?.isVerified ?? false,
     role: user?.role || 'user',
+    verification: user?.verification || {},
+    verificationDocuments: {
+      idProof: verificationDocuments?.idProof || {
+        url: '',
+        type: '',
+        mimeType: '',
+        uploadedAt: null,
+        status: 'pending',
+        rejectionReason: '',
+      },
+      drivingLicense: verificationDocuments?.drivingLicense || {
+        url: '',
+        type: '',
+        mimeType: '',
+        uploadedAt: null,
+        status: 'pending',
+        rejectionReason: '',
+      },
+      vehicleDocument: verificationDocuments?.vehicleDocument || {
+        url: '',
+        type: '',
+        mimeType: '',
+        uploadedAt: null,
+        status: 'pending',
+        rejectionReason: '',
+      },
+    },
+    vehicle: {
+      type: vehicle?.type || '',
+      brand: vehicle?.brand || '',
+      model: vehicle?.model || '',
+      number: vehicle?.number || '',
+      seats:
+        Number.isFinite(Number(vehicle?.seats)) && Number(vehicle?.seats) > 0
+          ? Number(vehicle.seats)
+          : null,
+      image: vehicle?.image || '',
+    },
+    isProfileCompleted: Boolean(user?.isProfileCompleted),
+    profileCompletionPercentage: Number(user?.profileCompletionPercentage || 0),
     currentLocation: normalizeLocation(user?.currentLocation),
   };
 };

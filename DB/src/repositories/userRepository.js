@@ -1,7 +1,7 @@
 import User from '../models/User.js';
 
 const PUBLIC_PROFILE_FIELDS =
-  'name profilePic bio rating rideCount isVerified verification vehicle.type vehicle.model vehicle.image createdAt';
+  'name profilePic profileImage selectedAvatar bio rating rideCount isVerified verification vehicle.type vehicle.brand vehicle.model vehicle.number vehicle.seats vehicle.image createdAt';
 
 export const userRepository = {
   findPublicByEmail: (email) => User.findOne({ email }),

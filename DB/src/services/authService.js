@@ -21,6 +21,7 @@ import {
 } from '../utils/AppError.js';
 import { logger } from '../utils/logger.js';
 import { safeRedis } from '../utils/redis.js';
+import { normalizeUserForClient } from '../utils/profileCompletion.js';
 
 const OTP_EXPIRY_SECONDS = 10 * 60;
 const OTP_LIMIT = 5;
@@ -147,31 +148,6 @@ const deliverOtpOrFallback = async ({ email, otp, type }) => {
   }
 };
 
-
-const toClientLocation = (location) => {
-  if (!location) return null;
-  const coords = location.coordinates || [];
-
-  if (Array.isArray(coords) && coords.length >= 2) {
-    return {
-      name: location.name || 'Current location',
-      lat: Number(coords[1]),
-      lng: Number(coords[0]),
-      updatedAt: location.updatedAt,
-    };
-  }
-
-  if (location.lat !== undefined && location.lng !== undefined) {
-    return {
-      name: location.name || 'Current location',
-      lat: Number(location.lat),
-      lng: Number(location.lng),
-      updatedAt: location.updatedAt,
-    };
-  }
-
-  return null;
-};
 
 const verifyOtpKey = (email) => `otp:verify:${email}`;
 const resetOtpKey = (email) => `otp:reset:${email}`;
@@ -337,22 +313,7 @@ export const authService = {
     return {
       accessToken,
       refreshToken,
-      user: {
-        id: user._id,
-        _id: user._id,
-        name: user.name,
-        email: user.email,
-        profilePic: user.profilePic || '',
-        bio: user.bio || '',
-        rating: user.rating || 0,
-        rideCount: user.rideCount || 0,
-        isVerified: user.isVerified,
-        role: user.role || 'user',
-        trustedContact: user.trustedContact || {},
-        verification: user.verification || {},
-        safetyPreferences: user.safetyPreferences || {},
-        currentLocation: toClientLocation(user.currentLocation),
-      },
+      user: normalizeUserForClient(user),
     };
   },
 

@@ -5,7 +5,7 @@ import {
   FileText, ArrowRight, Car, Image as ImageIcon, X
 } from 'lucide-react';
 import toast from 'react-hot-toast';
-import { useDispatch } from 'react-redux';
+import { useDispatch, useSelector } from 'react-redux';
 import { createRideThunk } from '../redux/slices/rideSlice';
 import LocationSearch from '../components/LocationSearch';
 
@@ -100,6 +100,7 @@ const getPostRideDraftPayload = (formData) => ({
 const PostRide = () => {
   const navigate = useNavigate();
   const dispatch = useDispatch();
+  const authUser = useSelector((state) => state.auth.user);
   const fileInputRef = useRef(null);
   const [loading, setLoading] = useState(false);
   const [imagePreview, setImagePreview] = useState(null);
@@ -119,6 +120,47 @@ const PostRide = () => {
 
     return () => clearTimeout(timer);
   }, [formData]);
+
+  useEffect(() => {
+    const vehicle = authUser?.vehicle || {};
+    const hasProfileVehicle = Boolean(
+      String(vehicle?.type || '').trim() &&
+        String(vehicle?.number || '').trim()
+    );
+    if (!hasProfileVehicle) return;
+
+    setFormData((prev) => {
+      const hasCustomVehicleValues =
+        String(prev?.vehicle?.brand || '').trim() ||
+        String(prev?.vehicle?.model || '').trim() ||
+        String(prev?.vehicle?.number || '').trim();
+      if (hasCustomVehicleValues) return prev;
+
+      const next = {
+        ...prev,
+        vehicle: {
+          ...prev.vehicle,
+          type: vehicle.type || prev.vehicle.type || 'car',
+          brand: vehicle.brand || '',
+          model: vehicle.model || '',
+          number: vehicle.number || '',
+        },
+      };
+
+      if (
+        Number(prev.seatsAvailable) === Number(DEFAULT_POST_RIDE_FORM.seatsAvailable) &&
+        Number(vehicle.seats) > 0
+      ) {
+        next.seatsAvailable = Number(vehicle.seats);
+      }
+
+      return next;
+    });
+
+    if (!imagePreview && vehicle?.image) {
+      setImagePreview(vehicle.image);
+    }
+  }, [authUser, imagePreview]);
 
   const handleChange = (e) => {
     const { name, value } = e.target;
@@ -368,6 +410,11 @@ const PostRide = () => {
                   <h3 className="text-lg font-bold text-slate-800 flex items-center gap-2">
                     <Car className="w-5 h-5 text-blue-500" /> Vehicle Information
                   </h3>
+                  {!authUser?.vehicle?.type ? (
+                    <p className="mt-2 text-xs font-semibold text-amber-700">
+                      Add vehicle details in your profile to auto-fill this next time.
+                    </p>
+                  ) : null}
                 </div>
 
                 <div className="relative group">

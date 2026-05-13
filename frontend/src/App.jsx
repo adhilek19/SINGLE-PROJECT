@@ -22,6 +22,7 @@ import RealtimeBridge from './components/RealtimeBridge';
 import PushNotificationManager from './components/PushNotificationManager';
 import CallProvider from './context/CallProvider';
 import AdminRoute from './routes/AdminRoute';
+import RequireCompleteProfile from './routes/RequireCompleteProfile';
 import Home from './pages/Home';
 import Login from './pages/Login';
 import Register from './pages/Register';
@@ -30,6 +31,7 @@ import PostRide from './pages/PostRide';
 import RideDetails from './pages/RideDetails';
 import MyRides from './pages/MyRides';
 import Profile from './pages/Profile';
+import CompleteProfile from './pages/CompleteProfile';
 
 const ForgotPassword = lazy(() => import('./pages/ForgotPassword'));
 const OTP = lazy(() => import('./pages/OTP'));
@@ -72,6 +74,7 @@ function AuthHandler() {
         profilePic: profilePic || '',
       })
     );
+    dispatch(initAuthThunk());
 
     navigate(location.pathname || '/', { replace: true });
   }, [location.search, location.pathname, navigate, dispatch]);
@@ -88,6 +91,28 @@ function TokenHydrator() {
       dispatch(initAuthThunk());
     }
   }, [isHydrated, dispatch]);
+
+  return null;
+}
+
+function ProfileCompletionRedirector() {
+  const navigate = useNavigate();
+  const location = useLocation();
+  const { token, user, isHydrated, isInitializing } = useSelector((s) => s.auth);
+
+  useEffect(() => {
+    if (!isHydrated || isInitializing || !token) return;
+    if (user?.isProfileCompleted) return;
+
+    const path = location.pathname;
+    const allowedPaths = new Set(['/complete-profile', '/login', '/register']);
+    if (allowedPaths.has(path)) return;
+
+    navigate('/complete-profile', {
+      replace: true,
+      state: { from: path },
+    });
+  }, [isHydrated, isInitializing, token, user?.isProfileCompleted, location.pathname, navigate]);
 
   return null;
 }
@@ -142,6 +167,7 @@ function App() {
     <Router>
       <AuthHandler />
       <TokenHydrator />
+      <ProfileCompletionRedirector />
       <RealtimeBridge />
       <PushNotificationManager />
       <CallProvider>
@@ -193,7 +219,18 @@ function App() {
               path="/post-ride"
               element={
                 <ProtectedRoute>
-                  <PostRide />
+                  <RequireCompleteProfile>
+                    <PostRide />
+                  </RequireCompleteProfile>
+                </ProtectedRoute>
+              }
+            />
+
+            <Route
+              path="/complete-profile"
+              element={
+                <ProtectedRoute>
+                  <CompleteProfile />
                 </ProtectedRoute>
               }
             />
