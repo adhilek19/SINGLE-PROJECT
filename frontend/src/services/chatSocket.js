@@ -96,6 +96,12 @@ export const sendMessageSeen = (messageId) =>
 export const sendMessageReaction = ({ messageId, emoji }) =>
   emitWithAck('message_reaction', { messageId, emoji });
 
+export const markSocketNotificationRead = (notificationId) =>
+  emitWithAck('notification:read', { notificationId });
+
+export const markAllSocketNotificationsRead = () =>
+  emitWithAck('notification:read_all', {});
+
 export const callUser = ({ chatId }) =>
   emitWithAck('call_user', { chatId });
 
@@ -135,6 +141,17 @@ export const onSocketConnect = (handler) => subscribe('connect', handler);
 export const onSocketDisconnect = (handler) => subscribe('disconnect', handler);
 export const onSocketConnectError = (handler) =>
   subscribe('connect_error', handler);
+export const onNotificationNew = (handler) =>
+  subscribe('notification:new', handler);
+export const onNotificationRead = (handler) =>
+  subscribe('notification:read', handler);
+export const onUnreadCount = (handler) => subscribe('unread:count', handler);
+export const onMessageNew = (handler) => subscribe('message:new', handler);
+export const onRequestNew = (handler) => subscribe('request:new', handler);
+export const onRequestAccepted = (handler) => subscribe('request:accepted', handler);
+export const onRequestRejected = (handler) => subscribe('request:rejected', handler);
+export const onUserOnlineAlias = (handler) => subscribe('user:online', handler);
+export const onUserOfflineAlias = (handler) => subscribe('user:offline', handler);
 
 export const onRideCreated = (handler) => subscribe('ride_created', handler);
 export const onRideUpdated = (handler) => subscribe('ride_updated', handler);

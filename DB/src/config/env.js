@@ -25,6 +25,7 @@ const envSchema = joi
     EMAIL_FAIL_OPEN: joi.boolean().truthy('true').falsy('false').optional(),
     EMAIL_LOG_OTP: joi.boolean().truthy('true').falsy('false').optional(),
     EMAIL_PROVIDER_BLOCK_SECONDS: joi.number().integer().min(30).max(86400).optional(),
+    NOTIFICATION_EMAIL_FALLBACK_MINUTES: joi.number().integer().min(5).max(1440).optional(),
 
     GOOGLE_CLIENT_ID: joi.string().required(),
     GOOGLE_CLIENT_SECRET: joi.string().required(),
@@ -75,6 +76,10 @@ if (value.EMAIL_LOG_OTP === undefined) {
 
 if (value.EMAIL_PROVIDER_BLOCK_SECONDS === undefined) {
   value.EMAIL_PROVIDER_BLOCK_SECONDS = 300;
+}
+
+if (value.NOTIFICATION_EMAIL_FALLBACK_MINUTES === undefined) {
+  value.NOTIFICATION_EMAIL_FALLBACK_MINUTES = 15;
 }
 
 export const env = value;

@@ -41,6 +41,7 @@ const PublicProfile = lazy(() => import('./pages/PublicProfile'));
 const TrackRide = lazy(() => import('./pages/TrackRide'));
 const ChatList = lazy(() => import('./pages/ChatList'));
 const ChatRoom = lazy(() => import('./pages/ChatRoom'));
+const Notifications = lazy(() => import('./pages/Notifications'));
 const AdminDashboard = lazy(() => import('./pages/admin/AdminDashboard'));
 const AdminUsers = lazy(() => import('./pages/admin/AdminUsers'));
 const AdminRides = lazy(() => import('./pages/admin/AdminRides'));
@@ -261,6 +262,17 @@ function App() {
                 <ProtectedRoute>
                   <LazyPage>
                     <ChatRoom />
+                  </LazyPage>
+                </ProtectedRoute>
+              }
+            />
+
+            <Route
+              path="/notifications"
+              element={
+                <ProtectedRoute>
+                  <LazyPage>
+                    <Notifications />
                   </LazyPage>
                 </ProtectedRoute>
               }

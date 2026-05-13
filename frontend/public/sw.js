@@ -52,6 +52,10 @@ self.addEventListener('push', (event) => {
     badge: '/favicon.svg',
     tag,
     renotify: false,
+    actions: [
+      { action: 'open', title: 'Open' },
+      { action: 'dismiss', title: 'Dismiss' },
+    ],
     data: {
       ...(payload.data || {}),
       url,
@@ -63,6 +67,18 @@ self.addEventListener('push', (event) => {
       const existing = await self.registration.getNotifications({ tag });
       existing.forEach((notification) => notification.close());
       await self.registration.showNotification(title, options);
+      const clients = await self.clients.matchAll({ type: 'window', includeUncontrolled: true });
+      clients.forEach((client) => {
+        client.postMessage({
+          type: 'notification:push',
+          payload: {
+            title,
+            body: options.body,
+            url,
+            data: options.data || {},
+          },
+        });
+      });
       swDebug('showNotification called', {
         title,
         tag,
@@ -74,6 +90,9 @@ self.addEventListener('push', (event) => {
 
 self.addEventListener('notificationclick', (event) => {
   event.notification.close();
+  if (event.action === 'dismiss') {
+    return;
+  }
   const targetPath = safeUrl(event.notification.data?.url);
   const targetUrl = new URL(targetPath, self.location.origin).href;
 

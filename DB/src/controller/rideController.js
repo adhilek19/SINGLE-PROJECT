@@ -138,6 +138,14 @@ export const completeRide = async (req, res, next) => {
   try {
     const ride = await rideService.completeRide(req.params.id, req.userId);
     await emitRideUpdated(ride);
+    const riderIds = [
+      ride?.driver?.toString?.() || '',
+      ...((ride?.passengers || []).map((p) => p?.user?.toString?.() || '')),
+    ].filter(Boolean);
+    await notificationService.notifyRideCompleted({
+      rideId: ride?._id,
+      riderIds,
+    });
     return successResponse(res, 200, 'Ride completed successfully', ride);
   } catch (err) {
     next(err);

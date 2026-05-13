@@ -3,6 +3,7 @@ import Ride from '../models/Ride.js';
 import { Report } from '../models/Report.js';
 import { BadRequest, NotFound } from '../utils/AppError.js';
 import { successResponse } from '../utils/apiResponse.js';
+import { notificationService } from '../services/notificationService.js';
 
 const VALID_USER_ROLES = new Set(['user', 'admin']);
 const VALID_RIDE_STATUSES = new Set(['scheduled', 'started', 'ended', 'completed', 'cancelled']);
@@ -108,6 +109,11 @@ export const blockUser = async (req, res, next) => {
     ).select('_id name email role isBlocked createdAt updatedAt');
 
     if (!user) throw NotFound('User not found');
+
+    await notificationService.notifyUserBlocked({
+      userId: user._id,
+      reason: 'Violation of platform rules',
+    });
 
     return successResponse(res, 200, 'User blocked', { user });
   } catch (err) {

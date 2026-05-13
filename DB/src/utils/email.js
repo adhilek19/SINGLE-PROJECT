@@ -286,12 +286,45 @@ export const sendOtpEmail = async (to, otp, type = 'verify') => {
   const subject = getOtpSubject(type);
   const htmlContent = getOtpHtml(otp, type);
 
+  return sendTransactionalEmail({
+    to,
+    subject,
+    htmlContent,
+    category: 'otp',
+  });
+};
+
+export const sendTransactionalEmail = async ({
+  to,
+  subject,
+  htmlContent,
+  textContent = '',
+  category = 'transactional',
+  tags = [],
+}) => {
+  const safeTo = String(to || '').trim().toLowerCase();
+  const safeSubject = String(subject || '').trim().slice(0, 180);
+  const safeHtml = String(htmlContent || '').trim();
+  const safeText = String(textContent || '').trim();
+
+  if (!safeTo || !safeSubject || !safeHtml) {
+    throw new EmailDeliveryError({
+      message: 'Email payload is invalid',
+      statusCode: 400,
+      code: 'email_payload_invalid',
+      reason: 'payload_invalid',
+      retryable: false,
+      permanent: false,
+      operatorHint: 'Ensure to, subject, and htmlContent are provided.',
+    });
+  }
+
   try {
     assertProviderNotBlocked();
 
     if (!hasBrevoApiKey || !hasValidSender) {
       throw new EmailDeliveryError({
-        message: 'OTP email service is temporarily unavailable. Please try again shortly.',
+        message: 'Email service is temporarily unavailable. Please try again shortly.',
         statusCode: 503,
         code: 'email_provider_not_configured',
         reason: 'provider_not_configured',
@@ -304,9 +337,11 @@ export const sendOtpEmail = async (to, otp, type = 'verify') => {
     const brevo = await getBrevoClient();
     const response = await brevo.transactionalEmails.sendTransacEmail({
       sender,
-      to: [{ email: to }],
-      subject,
-      htmlContent,
+      to: [{ email: safeTo }],
+      subject: safeSubject,
+      htmlContent: safeHtml,
+      textContent: safeText || undefined,
+      tags: Array.isArray(tags) ? tags.filter(Boolean).slice(0, 10) : undefined,
     });
 
     const messageId =
@@ -317,8 +352,9 @@ export const sendOtpEmail = async (to, otp, type = 'verify') => {
     logger.info({
       event: 'email_sent',
       provider: 'brevo',
-      to,
-      subject,
+      to: safeTo,
+      subject: safeSubject,
+      category,
       messageId,
       senderEmail: sender.email,
     });
@@ -346,8 +382,9 @@ export const sendOtpEmail = async (to, otp, type = 'verify') => {
     logger.error({
       event: 'email_failed',
       provider: 'brevo',
-      to,
-      subject,
+      to: safeTo,
+      subject: safeSubject,
+      category,
       senderEmail: sender.email,
       error: error?.message,
       statusCode:

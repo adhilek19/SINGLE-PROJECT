@@ -306,11 +306,30 @@ export const initSocket = ({ httpServer }) => {
       lastSeenByUser: Object.fromEntries(lastSeenByUser.entries()),
       at: new Date().toISOString(),
     });
+    socket.emit('user:online:list', {
+      userIds: Array.from(onlineSocketCounts.keys()),
+      lastSeenByUser: Object.fromEntries(lastSeenByUser.entries()),
+      at: new Date().toISOString(),
+    });
+
+    notificationService
+      .getUnreadCount(currentUserId)
+      .then(({ unreadCount }) => {
+        socket.emit('unread:count', {
+          unreadCount: Number(unreadCount || 0),
+          at: new Date().toISOString(),
+        });
+      })
+      .catch(() => {});
 
     const becameOnline = increaseOnlineCount(currentUserId);
     if (becameOnline) {
       lastSeenByUser.delete(currentUserId);
       io.emit('user_online', {
+        userId: currentUserId,
+        at: new Date().toISOString(),
+      });
+      io.emit('user:online', {
         userId: currentUserId,
         at: new Date().toISOString(),
       });
@@ -433,7 +452,7 @@ export const initSocket = ({ httpServer }) => {
         });
 
         if (!result?.deduped) {
-          notificationService.notifyChatMessage({
+          await notificationService.notifyChatMessage({
             receiverId: result.receiverId,
             senderId: currentUserId,
             chatId: result.chatId,
@@ -577,6 +596,37 @@ export const initSocket = ({ httpServer }) => {
       } catch (err) {
         if (typeof ack === 'function') {
           ack({ ok: false, message: err.message || 'message_reaction failed' });
+        }
+      }
+    });
+
+    socket.on('notification:read', async (payload = {}, ack) => {
+      try {
+        const notificationId = String(payload.notificationId || '').trim();
+        if (!notificationId) throw new Error('notificationId is required');
+        const notification = await notificationService.markAsRead({
+          userId: currentUserId,
+          notificationId,
+        });
+        if (typeof ack === 'function') {
+          ack({ ok: true, notification });
+        }
+      } catch (err) {
+        if (typeof ack === 'function') {
+          ack({ ok: false, message: err.message || 'notification:read failed' });
+        }
+      }
+    });
+
+    socket.on('notification:read_all', async (_payload = {}, ack) => {
+      try {
+        await notificationService.markAllAsRead({ userId: currentUserId });
+        if (typeof ack === 'function') {
+          ack({ ok: true });
+        }
+      } catch (err) {
+        if (typeof ack === 'function') {
+          ack({ ok: false, message: err.message || 'notification:read_all failed' });
         }
       }
     });
@@ -1275,6 +1325,11 @@ export const initSocket = ({ httpServer }) => {
         const lastSeenAt = new Date().toISOString();
         lastSeenByUser.set(currentUserId, lastSeenAt);
         io.emit('user_offline', {
+          userId: currentUserId,
+          at: lastSeenAt,
+          lastSeenAt,
+        });
+        io.emit('user:offline', {
           userId: currentUserId,
           at: lastSeenAt,
           lastSeenAt,

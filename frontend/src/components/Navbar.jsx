@@ -13,6 +13,7 @@ import { useDispatch, useSelector } from 'react-redux';
 import { logoutThunk } from '../redux/slices/authSlice';
 import { selectChatUnreadCount } from '../redux/slices/chatSlice';
 import UserAvatar, { getUserAvatarUrl } from './common/UserAvatar';
+import NotificationBell from './common/NotificationBell';
 
 const Navbar = () => {
   const navigate = useNavigate();
@@ -99,6 +100,8 @@ const Navbar = () => {
                       ) : null}
                     </Link>
 
+                    <NotificationBell />
+
                     <Link
                       to="/profile"
                       className="flex items-center gap-2 hover:text-blue-600"
@@ -156,6 +159,7 @@ const Navbar = () => {
             <div className="w-9 h-9 rounded-full bg-slate-200 animate-pulse" />
           ) : user ? (
             <div className="flex items-center gap-3">
+              <NotificationBell />
               <Link to="/chats" className="relative rounded-lg p-1.5 text-slate-600">
                 <MessageCircle className="h-5 w-5" />
                 {unreadCount > 0 ? (

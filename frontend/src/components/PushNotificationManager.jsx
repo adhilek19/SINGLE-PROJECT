@@ -1,6 +1,6 @@
- import { useEffect, useRef } from 'react';
+import { useEffect, useRef } from 'react';
 import toast from 'react-hot-toast';
-import { useSelector } from 'react-redux';
+import { useDispatch, useSelector } from 'react-redux';
 import {
   registerServiceWorker,
   getNotificationPermission,
@@ -9,15 +9,18 @@ import {
   shouldPromptForPush,
   subscribeToPush,
 } from '../services/pushNotifications';
+import { fetchUnreadCount } from '../redux/slices/notificationSlice';
 
 const toId = (value) =>
   (value && typeof value === 'object' ? value._id : value)?.toString?.() || '';
 const isDev = import.meta.env.DEV;
 
 const PushNotificationManager = () => {
+  const dispatch = useDispatch();
   const token = useSelector((state) => state.auth.token);
   const user = useSelector((state) => state.auth.user);
   const promptedRef = useRef(false);
+  const lastForegroundPushRef = useRef({ key: '', at: 0 });
   const userId = toId(user?._id || user?.id);
 
   useEffect(() => {
@@ -89,6 +92,51 @@ const PushNotificationManager = () => {
       { duration: 12000 }
     );
   }, [token, userId]);
+
+  useEffect(() => {
+    if (!token || !('serviceWorker' in navigator)) return undefined;
+
+    const onMessage = (event) => {
+      const payload = event?.data?.payload || {};
+      const key = `${payload?.data?.notificationId || ''}:${payload?.url || ''}`;
+      const now = Date.now();
+      if (
+        key &&
+        lastForegroundPushRef.current.key === key &&
+        now - Number(lastForegroundPushRef.current.at || 0) < 1500
+      ) {
+        return;
+      }
+      lastForegroundPushRef.current = { key, at: now };
+
+      dispatch(fetchUnreadCount());
+      if (document.visibilityState === 'visible' && payload?.title) {
+        toast.custom(
+          (t) => (
+            <button
+              type="button"
+              onClick={() => {
+                toast.dismiss(t.id);
+                if (payload?.url) {
+                  window.location.assign(payload.url);
+                }
+              }}
+              className="max-w-sm rounded-xl border border-slate-200 bg-white p-3 text-left shadow-lg"
+            >
+              <p className="text-sm font-black text-slate-900">{payload.title}</p>
+              <p className="mt-1 text-xs text-slate-600">{payload.body}</p>
+            </button>
+          ),
+          { duration: 4500 }
+        );
+      }
+    };
+
+    navigator.serviceWorker.addEventListener('message', onMessage);
+    return () => {
+      navigator.serviceWorker.removeEventListener('message', onMessage);
+    };
+  }, [dispatch, token]);
 
   return null;
 };

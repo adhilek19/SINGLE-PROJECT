@@ -362,6 +362,13 @@ export const adminService = {
   updateReportStatus: (id, status) => api.patch(`/admin/reports/${id}/status`, { status }),
 };
 
+export const notificationService = {
+  getNotifications: (params = {}) => api.get('/notifications', { params }),
+  getUnreadCount: () => api.get('/notifications/unread-count'),
+  markRead: (notificationId) => api.patch(`/notifications/${notificationId}/read`),
+  markAllRead: () => api.patch('/notifications/read-all'),
+};
+
 export const postService = {
   createPost: rideService.createRide,
   getFeed: rideService.getRides,

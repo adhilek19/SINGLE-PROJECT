@@ -128,7 +128,7 @@ const dispatchMessageToChat = async ({ result }) => {
     });
   }
 
-  notificationService.notifyChatMessage({
+  await notificationService.notifyChatMessage({
     receiverId: result.receiverId,
     senderId: messagePayload?.sender,
     chatId: result.chatId,

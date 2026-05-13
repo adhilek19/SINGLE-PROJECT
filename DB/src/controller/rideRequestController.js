@@ -16,12 +16,13 @@ export const createRideRequest = async (req, res, next) => {
       req.body
     );
     emitRideJoinRequested(result?.request);
-    notificationService.notifyRideRequest({
+    await notificationService.notifyRideRequest({
       driverId: result?.request?.driver,
       passengerId: result?.request?.passenger,
       passengerName: result?.request?.passenger?.name,
       rideId: result?.request?.ride,
       requestId: result?.request?._id,
+      driverEmail: result?.request?.driver?.email || '',
     });
 
     return successResponse(res, 201, 'Ride request created', result);
@@ -71,12 +72,13 @@ export const acceptRideRequest = async (req, res, next) => {
     if (ride) {
       await emitRideUpdated(ride);
     }
-    notificationService.notifyRideDecision({
+    await notificationService.notifyRideDecision({
       passengerId: request?.passenger,
       driverId: request?.driver,
       status: 'accepted',
       rideId: request?.ride,
       requestId: request?._id,
+      passengerEmail: request?.passenger?.email || '',
     });
 
     return successResponse(res, 200, 'Ride request accepted', { request, ride });
@@ -98,12 +100,13 @@ export const rejectRideRequest = async (req, res, next) => {
     if (ride) {
       await emitRideUpdated(ride);
     }
-    notificationService.notifyRideDecision({
+    await notificationService.notifyRideDecision({
       passengerId: request?.passenger,
       driverId: request?.driver,
       status: 'rejected',
       rideId: request?.ride,
       requestId: request?._id,
+      passengerEmail: request?.passenger?.email || '',
     });
 
     return successResponse(res, 200, 'Ride request rejected', { request, ride });
