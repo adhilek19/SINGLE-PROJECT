@@ -20,6 +20,7 @@ import Navbar from './components/Navbar';
 import RealtimeBridge from './components/RealtimeBridge';
 import PushNotificationManager from './components/PushNotificationManager';
 import CallProvider from './context/CallProvider';
+import AdminRoute from './routes/AdminRoute';
 import Home from './pages/Home';
 import Login from './pages/Login';
 import Register from './pages/Register';
@@ -37,6 +38,10 @@ const PublicProfile = lazy(() => import('./pages/PublicProfile'));
 const TrackRide = lazy(() => import('./pages/TrackRide'));
 const ChatList = lazy(() => import('./pages/ChatList'));
 const ChatRoom = lazy(() => import('./pages/ChatRoom'));
+const AdminDashboard = lazy(() => import('./pages/admin/AdminDashboard'));
+const AdminUsers = lazy(() => import('./pages/admin/AdminUsers'));
+const AdminRides = lazy(() => import('./pages/admin/AdminRides'));
+const AdminReports = lazy(() => import('./pages/admin/AdminReports'));
 
 const LoadingScreen = () => (
   <div className="flex-grow flex items-center justify-center">
@@ -227,6 +232,50 @@ function App() {
                     <EditRide />
                   </LazyPage>
                 </ProtectedRoute>
+              }
+            />
+
+            <Route
+              path="/admin"
+              element={
+                <AdminRoute>
+                  <LazyPage>
+                    <AdminDashboard />
+                  </LazyPage>
+                </AdminRoute>
+              }
+            />
+
+            <Route
+              path="/admin/users"
+              element={
+                <AdminRoute>
+                  <LazyPage>
+                    <AdminUsers />
+                  </LazyPage>
+                </AdminRoute>
+              }
+            />
+
+            <Route
+              path="/admin/rides"
+              element={
+                <AdminRoute>
+                  <LazyPage>
+                    <AdminRides />
+                  </LazyPage>
+                </AdminRoute>
+              }
+            />
+
+            <Route
+              path="/admin/reports"
+              element={
+                <AdminRoute>
+                  <LazyPage>
+                    <AdminReports />
+                  </LazyPage>
+                </AdminRoute>
               }
             />
 

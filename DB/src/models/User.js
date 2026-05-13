@@ -132,8 +132,14 @@ const userSchema = new mongoose.Schema(
 
     role: {
       type: String,
-      enum: ['user', 'rider', 'admin'],
+      enum: ['user', 'admin'],
       default: 'user',
+      index: true,
+    },
+
+    isBlocked: {
+      type: Boolean,
+      default: false,
       index: true,
     },
 
@@ -206,6 +212,12 @@ const userSchema = new mongoose.Schema(
 );
 
 userSchema.pre('validate', function () {
+  // Legacy compatibility: migrate any stale "rider" role value to "user"
+  // to avoid validation failures on existing documents during saves.
+  if (this.role === 'rider') {
+    this.role = 'user';
+  }
+
   this.verification = this.verification || {};
 
   this.verification.email = Boolean(this.isVerified);

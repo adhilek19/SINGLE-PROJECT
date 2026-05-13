@@ -1,6 +1,7 @@
 import jwt from 'jsonwebtoken';
 import { env } from '../config/env.js';
-import { Unauthorized } from '../utils/AppError.js';
+import User from '../models/User.js';
+import { Forbidden, Unauthorized } from '../utils/AppError.js';
 import { safeRedis } from '../utils/redis.js';
 
 export const protect = async (req, res, next) => {
@@ -20,8 +21,19 @@ export const protect = async (req, res, next) => {
       return next(Unauthorized('Token invalidated. Please log in again.'));
     }
 
+    const user = await User.findById(decoded.id).select('_id role isBlocked');
+    if (!user) {
+      return next(Unauthorized('User not found. Please log in again.'));
+    }
+
+    if (user.isBlocked) {
+      return next(Forbidden('Your account has been blocked. Contact support.'));
+    }
+
     req.userId = decoded.id;
     req.tokenJti = decoded.jti;
+    req.userRole = user.role || 'user';
+    req.user = user;
 
     next();
   } catch (err) {

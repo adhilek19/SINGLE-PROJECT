@@ -316,6 +316,20 @@ export const reportService = {
   createReport: (data) => api.post('/reports', data),
 };
 
+export const adminService = {
+  getStats: () => api.get('/admin/stats'),
+  getUsers: (params = {}) => api.get('/admin/users', { params }),
+  blockUser: (id) => api.patch(`/admin/users/${id}/block`),
+  unblockUser: (id) => api.patch(`/admin/users/${id}/unblock`),
+  makeAdmin: (id) => api.patch(`/admin/users/${id}/make-admin`),
+
+  getRides: (params = {}) => api.get('/admin/rides', { params }),
+  updateRideStatus: (id, status) => api.patch(`/admin/rides/${id}/status`, { status }),
+
+  getReports: (params = {}) => api.get('/admin/reports', { params }),
+  updateReportStatus: (id, status) => api.patch(`/admin/reports/${id}/status`, { status }),
+};
+
 export const postService = {
   createPost: rideService.createRide,
   getFeed: rideService.getRides,
