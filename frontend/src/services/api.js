@@ -1,12 +1,17 @@
 import axios from 'axios';
 
-const backendUrl = import.meta.env.VITE_BACKEND_URL;
+const backendUrlFromEnv = import.meta.env.VITE_BACKEND_URL;
 const apiUrlFromEnv = import.meta.env.VITE_API_URL;
 
-const API_URL = apiUrlFromEnv
-  || (backendUrl
-    ? `${backendUrl.replace(/\/$/, '')}/api`
-    : 'https://sahayatri-p95g.onrender.com/api');
+const normalizeBase = (value) => String(value || '').trim().replace(/\/+$/, '');
+
+export const BACKEND_URL = normalizeBase(
+  backendUrlFromEnv ||
+    (apiUrlFromEnv ? apiUrlFromEnv.replace(/\/api\/?$/i, '') : '') ||
+    'https://sahayatri-p95g.onrender.com'
+);
+
+const API_URL = normalizeBase(apiUrlFromEnv) || `${BACKEND_URL}/api`;
 
 let _accessToken = null;
 
@@ -22,9 +27,14 @@ export const tokenStore = {
 
 let refreshPromise = null;
 let onAuthFailure = null;
+let onTokenRefresh = null;
 
 export const setAuthFailureHandler = (handler) => {
   onAuthFailure = typeof handler === 'function' ? handler : null;
+};
+
+export const setTokenRefreshHandler = (handler) => {
+  onTokenRefresh = typeof handler === 'function' ? handler : null;
 };
 
 export const getErrorMessage = (error, fallback = 'Something went wrong') => {
@@ -120,6 +130,7 @@ api.interceptors.response.use(
       if (!newToken) throw new Error('No access token returned');
 
       tokenStore.set(newToken);
+      if (onTokenRefresh) onTokenRefresh(newToken);
 
       originalRequest.headers = originalRequest.headers || {};
       originalRequest.headers.Authorization = `Bearer ${newToken}`;

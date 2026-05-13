@@ -1,6 +1,4 @@
 import { Server } from 'socket.io';
-import jwt from 'jsonwebtoken';
-import { env } from '../config/env.js';
 import User from '../models/User.js';
 import Ride from '../models/Ride.js';
 import RideRequest from '../models/RideRequest.js';
@@ -14,30 +12,13 @@ import {
 import { messageService } from '../services/messageService.js';
 import { callService } from '../services/callService.js';
 import { notificationService } from '../services/notificationService.js';
+import { authenticateAccessToken } from '../utils/accessAuth.js';
+import { validateCorsOrigin } from '../utils/corsConfig.js';
+import { logger } from '../utils/logger.js';
 
 const RIDE_ROOM_PREFIX = 'ride:';
 const trackingRoomName = (rideId) => `${RIDE_ROOM_PREFIX}${rideId}:tracking`;
 const publicTrackingRoomName = (rideId) => `public:${RIDE_ROOM_PREFIX}${rideId}:tracking`;
-
-const normalizeOrigin = (origin = '') => String(origin).trim().replace(/\/+$/, '');
-
-const allowedOrigins = [
-  'http://localhost:5173',
-  'http://localhost:5174',
-  env.CLIENT_URL,
-  ...(env.CLIENT_URLS ? env.CLIENT_URLS.split(',') : []),
-]
-  .map(normalizeOrigin)
-  .filter(Boolean);
-
-const vercelPreviewRegex =
-  /^https:\/\/saha-yatri-[a-z0-9-]+-adhilek100-3295s-projects\.vercel\.app$/i;
-
-const isAllowedOrigin = (origin) => {
-  if (!origin) return true;
-  const normalizedOrigin = normalizeOrigin(origin);
-  return allowedOrigins.includes(normalizedOrigin) || vercelPreviewRegex.test(normalizedOrigin);
-};
 
 const toKmh = (speedMps) => {
   const n = Number(speedMps);
@@ -134,8 +115,7 @@ export const initSocket = ({ httpServer }) => {
   const io = new Server(httpServer, {
     cors: {
       origin(origin, callback) {
-        if (isAllowedOrigin(origin)) return callback(null, true);
-        return callback(new Error(`Socket CORS blocked for origin: ${origin}`), false);
+        validateCorsOrigin(origin, callback, 'socket.io');
       },
       credentials: true,
     },
@@ -284,20 +264,33 @@ export const initSocket = ({ httpServer }) => {
         (socket.handshake.headers.authorization || '').replace(/^Bearer\s+/i, '');
 
       if (!token) {
-        return next(new Error('Unauthorized'));
+        logger.warn({
+          event: 'socket_auth_missing_token',
+          userId: '',
+          socketId: socket.id,
+        });
+        return next(new Error('Socket authentication failed: access token missing'));
       }
 
-      const decoded = jwt.verify(token, env.ACCESS_SECRET);
-      const user = await User.findById(decoded.id).select('_id role name profilePic');
+      const authResult = await authenticateAccessToken(token);
 
-      if (!user) {
-        return next(new Error('Unauthorized'));
+      socket.user = authResult.user;
+      socket.data.userId = authResult.userId;
+      if (process.env.NODE_ENV !== 'production') {
+        logger.info({
+          event: 'socket_auth_success',
+          userId: authResult.userId,
+        });
       }
-
-      socket.user = user;
       return next();
-    } catch {
-      return next(new Error('Unauthorized'));
+    } catch (err) {
+      logger.warn({
+        event: 'socket_auth_failed',
+        userId: '',
+        socketId: socket.id,
+        reason: err?.message || 'Invalid token',
+      });
+      return next(new Error(err?.message || 'Socket authentication failed'));
     }
   });
 

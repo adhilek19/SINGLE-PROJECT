@@ -1,45 +1,39 @@
-import jwt from 'jsonwebtoken';
-import { env } from '../config/env.js';
-import User from '../models/User.js';
-import { Forbidden, Unauthorized } from '../utils/AppError.js';
-import { safeRedis } from '../utils/redis.js';
+import { logger } from '../utils/logger.js';
+import { authenticateAccessToken } from '../utils/accessAuth.js';
+import { Unauthorized } from '../utils/AppError.js';
 
 export const protect = async (req, res, next) => {
   const header = req.headers.authorization;
 
-  if (!header?.startsWith('Bearer '))
+  if (!header?.startsWith('Bearer ')) {
+    logger.warn({
+      event: 'rest_auth_missing_token',
+      requestId: req.requestId,
+      path: req.originalUrl,
+      method: req.method,
+    });
     return next(Unauthorized('Authentication required'));
+  }
 
-  const token = header.split(' ')[1];
+  const token = String(header.split(' ')[1] || '').trim();
 
   try {
-    const decoded = jwt.verify(token, env.ACCESS_SECRET);
+    const authResult = await authenticateAccessToken(token);
 
-    // 🔴 CHECK BLACKLIST
-    const blacklisted = await safeRedis.get(`bl:${decoded.jti}`);
-    if (blacklisted) {
-      return next(Unauthorized('Token invalidated. Please log in again.'));
-    }
-
-    const user = await User.findById(decoded.id).select('_id role isBlocked');
-    if (!user) {
-      return next(Unauthorized('User not found. Please log in again.'));
-    }
-
-    if (user.isBlocked) {
-      return next(Forbidden('Your account has been blocked. Contact support.'));
-    }
-
-    req.userId = decoded.id;
-    req.tokenJti = decoded.jti;
-    req.userRole = user.role || 'user';
-    req.user = user;
+    req.userId = authResult.userId;
+    req.tokenJti = authResult.jti;
+    req.userRole = authResult.user.role || 'user';
+    req.user = authResult.user;
 
     next();
   } catch (err) {
-    if (err?.name === 'TokenExpiredError') {
-      return next(Unauthorized('Token expired. Please log in again.'));
-    }
-    return next(Unauthorized('Invalid token'));
+    logger.warn({
+      event: 'rest_auth_failed',
+      requestId: req.requestId,
+      path: req.originalUrl,
+      method: req.method,
+      reason: err?.message || 'Invalid token',
+    });
+    return next(err);
   }
 };

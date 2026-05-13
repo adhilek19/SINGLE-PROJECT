@@ -201,6 +201,7 @@ export const getMessages = createAsyncThunk(
     } catch (err) {
       return rejectWithValue({
         chatId,
+        status: err.response?.status || 0,
         message: err.response?.data?.message || 'Failed to fetch messages',
       });
     }

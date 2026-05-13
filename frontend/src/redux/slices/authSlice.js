@@ -162,6 +162,8 @@ const authSlice = createSlice({
 
     clearSession(state) {
       tokenStore.clear();
+      clearJoinedChatState();
+      disconnectSocket();
 
       state.token = null;
       state.user = null;
@@ -171,6 +173,15 @@ const authSlice = createSlice({
       state.isInitializing = false;
 
       localStorage.removeItem('authUser');
+    },
+
+    setAccessToken(state, action) {
+      const nextToken = String(action.payload || '').trim();
+      if (!nextToken) return;
+      tokenStore.set(nextToken);
+      state.token = nextToken;
+      state.isHydrated = true;
+      state.isInitializing = false;
     },
 
     setUser(state, action) {
@@ -240,6 +251,7 @@ const authSlice = createSlice({
 export const {
   setSessionFromOAuth,
   clearSession,
+  setAccessToken,
   setUser,
 } = authSlice.actions;
 

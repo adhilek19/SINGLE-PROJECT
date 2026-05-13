@@ -37,6 +37,7 @@ import {
   onRideJoinRejected,
   onRideJoinRequested,
   onRideUpdated,
+  onSocketConnectError,
   onStopTyping,
   onTyping,
   onUserOffline,
@@ -51,6 +52,8 @@ const RealtimeBridge = () => {
   const dispatch = useDispatch();
   const token = useSelector((state) => state.auth.token);
   const user = useSelector((state) => state.auth.user);
+  const isHydrated = useSelector((state) => state.auth.isHydrated);
+  const isInitializing = useSelector((state) => state.auth.isInitializing);
   const chats = useSelector((state) => state.chat.chats);
   const chatsStatus = useSelector((state) => state.chat.chatsStatus);
   const joinedChatIdsRef = useRef(new Set());
@@ -58,16 +61,16 @@ const RealtimeBridge = () => {
   const currentUserId = toId(user?._id || user?.id);
 
   useEffect(() => {
-    if (!token || !currentUserId) return;
+    if (!isHydrated || isInitializing || !token || !currentUserId) return;
 
     connectChatSocket();
     if (chatsStatus === 'idle') {
       dispatch(getMyChats());
     }
-  }, [token, currentUserId, chatsStatus, dispatch]);
+  }, [isHydrated, isInitializing, token, currentUserId, chatsStatus, dispatch]);
 
   useEffect(() => {
-    if (!token || !currentUserId) {
+    if (!isHydrated || isInitializing || !token || !currentUserId) {
       joinedChatIdsRef.current.clear();
       clearJoinedChatState();
       disconnectSocket();
@@ -91,7 +94,7 @@ const RealtimeBridge = () => {
       joinedChatIdsRef.current.delete(chatId);
       leaveChat(chatId).catch(() => {});
     });
-  }, [token, currentUserId, chats]);
+  }, [isHydrated, isInitializing, token, currentUserId, chats]);
 
   useEffect(
     () => () => {
@@ -103,7 +106,7 @@ const RealtimeBridge = () => {
   );
 
   useEffect(() => {
-    if (!token || !currentUserId) return undefined;
+    if (!isHydrated || isInitializing || !token || !currentUserId) return undefined;
 
     const syncMyRides = () => {
       dispatch(fetchMyRidesThunk());
@@ -127,6 +130,12 @@ const RealtimeBridge = () => {
       onOnlineUsers((payload) => dispatch(socketOnlineUsers(payload))),
       onUserOnline((payload) => dispatch(socketUserOnline(payload))),
       onUserOffline((payload) => dispatch(socketUserOffline(payload))),
+      onSocketConnectError((err) => {
+        if (import.meta.env.DEV) {
+          const message = String(err?.message || 'socket connect error');
+          console.warn('[socket] connect_error:', message);
+        }
+      }),
       onRideCreated((payload) => {
         dispatch(socketRideCreated(payload));
         syncMyRides();
@@ -186,7 +195,7 @@ const RealtimeBridge = () => {
     return () => {
       unsubscribers.forEach((unsubscribe) => unsubscribe?.());
     };
-  }, [token, currentUserId, dispatch]);
+  }, [isHydrated, isInitializing, token, currentUserId, dispatch]);
 
   return null;
 };

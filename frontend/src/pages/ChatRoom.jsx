@@ -59,11 +59,15 @@ const ChatRoom = () => {
   const [mediaUploading, setMediaUploading] = useState(false);
   const [mediaUploadProgress, setMediaUploadProgress] = useState(0);
 
+  const token = useSelector((state) => state.auth.token);
   const user = useSelector((state) => state.auth.user);
+  const isHydrated = useSelector((state) => state.auth.isHydrated);
+  const isInitializing = useSelector((state) => state.auth.isInitializing);
   const chats = useSelector((state) => state.chat.chats);
   const chatsStatus = useSelector((state) => state.chat.chatsStatus);
   const messagesByChat = useSelector((state) => state.chat.messagesByChat);
   const messagesStatusByChat = useSelector((state) => state.chat.messagesStatusByChat);
+  const messagesErrorByChat = useSelector((state) => state.chat.messagesErrorByChat);
   const typingByChat = useSelector((state) => state.chat.typingByChat);
   const onlineUsers = useSelector((state) => state.chat.onlineUsers);
   const lastSeenByUser = useSelector((state) => state.chat.lastSeenByUser);
@@ -82,6 +86,8 @@ const ChatRoom = () => {
     [messagesByChat, safeChatId]
   );
   const messageLoadState = messagesStatusByChat[safeChatId] || 'idle';
+  const messageLoadError = messagesErrorByChat[safeChatId] || '';
+  const authReady = isHydrated && !isInitializing && Boolean(token) && Boolean(currentUserId);
 
   const chat = chats.find((entry) => toId(entry?._id) === safeChatId);
   const otherUser = (chat?.participants || []).find(
@@ -97,7 +103,7 @@ const ChatRoom = () => {
   const callInThisChat = isCallForChat(safeChatId);
 
   useEffect(() => {
-    if (!safeChatId) return undefined;
+    if (!safeChatId || !authReady) return undefined;
     dispatch(setActiveChatId(safeChatId));
     if (chatsStatus === 'idle') {
       dispatch(getMyChats());
@@ -109,10 +115,10 @@ const ChatRoom = () => {
       dispatch(clearTypingForChat(safeChatId));
       dispatch(setActiveChatId(null));
     };
-  }, [chatsStatus, dispatch, safeChatId]);
+  }, [authReady, chatsStatus, dispatch, safeChatId]);
 
   useEffect(() => {
-    if (!safeChatId) return undefined;
+    if (!safeChatId || !authReady) return undefined;
 
     const syncChatFocus = () => {
       const visible = document.visibilityState === 'visible' && document.hasFocus();
@@ -132,7 +138,7 @@ const ChatRoom = () => {
       window.removeEventListener('blur', syncChatFocus);
       unsubscribeConnect?.();
     };
-  }, [safeChatId]);
+  }, [authReady, safeChatId]);
 
   useEffect(() => {
     if (!messages.length || !currentUserId) return;
@@ -499,10 +505,62 @@ const ChatRoom = () => {
     );
   }
 
+  if (!isHydrated || isInitializing) {
+    return (
+      <div className="flex-grow flex items-center justify-center bg-slate-100">
+        <div className="h-10 w-10 animate-spin rounded-full border-4 border-slate-300 border-t-emerald-500" />
+      </div>
+    );
+  }
+
+  if (!authReady) {
+    return (
+      <div className="flex-grow flex items-center justify-center bg-slate-100">
+        <p className="text-sm font-semibold text-slate-600">Preparing your chat session...</p>
+      </div>
+    );
+  }
+
   if (messageLoadState === 'loading' && !messages.length) {
     return (
       <div className="flex-grow flex items-center justify-center bg-slate-100">
         <div className="h-10 w-10 animate-spin rounded-full border-4 border-slate-300 border-t-emerald-500" />
+      </div>
+    );
+  }
+
+  if (messageLoadState === 'failed' && !messages.length) {
+    const safeMessage = String(messageLoadError || 'Unable to load chat messages');
+    const sessionExpired = /(token|session|unauthoriz|expired|forbidden|access denied|log in)/i.test(
+      safeMessage
+    );
+
+    return (
+      <div className="flex-grow bg-slate-100 px-4 py-6">
+        <div className="mx-auto max-w-xl rounded-2xl border border-rose-200 bg-rose-50 p-6 text-center">
+          <h2 className="text-lg font-black text-rose-900">
+            {sessionExpired ? 'Session expired' : 'Could not load messages'}
+          </h2>
+          <p className="mt-2 text-sm text-rose-700">{safeMessage}</p>
+          <div className="mt-4 flex items-center justify-center gap-2">
+            <button
+              type="button"
+              onClick={() => dispatch(getMessages({ chatId: safeChatId }))}
+              className="rounded-xl bg-rose-700 px-4 py-2 text-sm font-bold text-white"
+            >
+              Retry
+            </button>
+            {sessionExpired ? (
+              <button
+                type="button"
+                onClick={() => navigate('/login')}
+                className="rounded-xl border border-rose-300 bg-white px-4 py-2 text-sm font-bold text-rose-700"
+              >
+                Go to Login
+              </button>
+            ) : null}
+          </div>
+        </div>
       </div>
     );
   }

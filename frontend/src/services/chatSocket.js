@@ -133,6 +133,8 @@ export const onUserOffline = (handler) => subscribe('user_offline', handler);
 export const onOnlineUsers = (handler) => subscribe('online_users', handler);
 export const onSocketConnect = (handler) => subscribe('connect', handler);
 export const onSocketDisconnect = (handler) => subscribe('disconnect', handler);
+export const onSocketConnectError = (handler) =>
+  subscribe('connect_error', handler);
 
 export const onRideCreated = (handler) => subscribe('ride_created', handler);
 export const onRideUpdated = (handler) => subscribe('ride_updated', handler);

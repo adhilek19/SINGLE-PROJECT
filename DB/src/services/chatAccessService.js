@@ -125,7 +125,9 @@ export const ensureRideChatPair = async ({
 };
 
 export const ensureChatAccess = async ({ chatId, userId }) => {
-  assertObjectId(chatId, 'chat id');
+  if (!mongoose.Types.ObjectId.isValid(String(chatId || ''))) {
+    throw NotFound('Chat not found');
+  }
   assertObjectId(userId, 'user id');
 
   const chat = await Chat.findById(chatId).select('ride participants chatKind');

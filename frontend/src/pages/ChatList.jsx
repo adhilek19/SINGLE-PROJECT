@@ -60,16 +60,20 @@ const ChatList = () => {
   const chats = useSelector((state) => state.chat.chats);
   const chatsStatus = useSelector((state) => state.chat.chatsStatus);
   const chatsError = useSelector((state) => state.chat.chatsError);
+  const token = useSelector((state) => state.auth.token);
+  const isHydrated = useSelector((state) => state.auth.isHydrated);
+  const isInitializing = useSelector((state) => state.auth.isInitializing);
   const onlineUsers = useSelector((state) => state.chat.onlineUsers);
   const lastSeenByUser = useSelector((state) => state.chat.lastSeenByUser);
 
   const currentUserId = toId(user?._id || user?.id);
 
   useEffect(() => {
+    if (!isHydrated || isInitializing || !token) return;
     if (chatsStatus === 'idle') {
       dispatch(getMyChats());
     }
-  }, [dispatch, chatsStatus]);
+  }, [dispatch, chatsStatus, isHydrated, isInitializing, token]);
 
   const chatItems = useMemo(
     () =>

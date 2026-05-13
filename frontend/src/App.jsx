@@ -13,8 +13,9 @@ import {
   setSessionFromOAuth,
   initAuthThunk,
   clearSession,
+  setAccessToken,
 } from './redux/slices/authSlice';
-import { setAuthFailureHandler } from './services/api';
+import { setAuthFailureHandler, setTokenRefreshHandler } from './services/api';
 
 import Navbar from './components/Navbar';
 import RealtimeBridge from './components/RealtimeBridge';
@@ -117,7 +118,11 @@ function App() {
 
   useEffect(() => {
     setAuthFailureHandler(() => dispatch(clearSession()));
-    return () => setAuthFailureHandler(null);
+    setTokenRefreshHandler((nextToken) => dispatch(setAccessToken(nextToken)));
+    return () => {
+      setAuthFailureHandler(null);
+      setTokenRefreshHandler(null);
+    };
   }, [dispatch]);
 
   useEffect(() => {

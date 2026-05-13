@@ -13,6 +13,7 @@ import { env } from './src/config/env.js';
 import { errorHandler, notFoundHandler } from './src/middleware/errorHandler.js';
 import { requestId } from './src/middleware/requestId.js'; 
 import { apiLimiter } from './src/middleware/rateLimit.js';
+import { validateCorsOrigin } from './src/utils/corsConfig.js';
 
 import authRoutes from './src/routes/authRoutes.js';
 import rideRoutes from './src/routes/rideRoutes.js';
@@ -31,34 +32,9 @@ import './src/config/passport.js'; // ✅ this is already correct
 
 const app = express();
 
-const normalizeOrigin = (origin = '') => origin.trim().replace(/\/+$/, '');
-
-const allowedOrigins = [
-  'http://localhost:5173',
-  'http://localhost:5174',
-  env.CLIENT_URL,
-  ...(env.CLIENT_URLS ? env.CLIENT_URLS.split(',') : []),
-]
-  .map(normalizeOrigin)
-  .filter(Boolean);
-
-const vercelPreviewRegex =
-  /^https:\/\/saha-yatri-[a-z0-9-]+-adhilek100-3295s-projects\.vercel\.app$/i;
-
 const corsOptions = {
   origin(origin, callback) {
-    if (!origin) return callback(null, true);
-
-    const normalizedOrigin = normalizeOrigin(origin);
-
-    if (
-      allowedOrigins.includes(normalizedOrigin) ||
-      vercelPreviewRegex.test(normalizedOrigin)
-    ) {
-      return callback(null, true);
-    }
-
-    return callback(new Error(`CORS blocked for origin: ${origin}`), false);
+    validateCorsOrigin(origin, callback, 'express');
   },
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
@@ -105,10 +81,10 @@ app.use(errorHandler);
 
 export const startServer = async () => {
   try {
-    console.log('🚀 Starting server...\n');
+    console.log(' Starting server...\n');
 
     await connectDB();
-    console.log('✅ MongoDB connected');
+    console.log('MongoDB connected');
 
     try {
       await redis.connect();
